@@ -125,6 +125,7 @@ class CamLinkDesktop:
         ttk.Button(studio_tools, text="Save snapshot", command=self.save_snapshot).pack(side="left")
         ttk.Button(studio_tools, text="Fit to window", command=lambda: self.set_preview_mode("fit")).pack(side="left", padx=(7, 0))
         ttk.Button(studio_tools, text="Original size", command=lambda: self.set_preview_mode("original")).pack(side="left", padx=(7, 0))
+        ttk.Button(studio_tools, text="⚡ Max FPS preset", command=self.apply_performance_profile).pack(side="left", padx=(7, 0))
         self.fullscreen_button = ttk.Button(studio_tools, text="Fullscreen  (F11)", command=self.toggle_fullscreen)
         self.fullscreen_button.pack(side="right")
 
@@ -404,6 +405,38 @@ class CamLinkDesktop:
 
     def apply_jpeg(self):
         self.send_control("jpeg", int(self.jpeg_value.get()))
+
+    def apply_performance_profile(self):
+        # Favor the camera/network/preview pipeline over maximum image detail.
+        self.resolution.set("720p · HD")
+        self.jpeg_value.set(75)
+        self.save_settings()
+        if not self.running:
+            self.control_status.set("Performance preset saved. Connect to the camera to apply 720p / JPEG 75%.")
+            return
+
+        self.control_status.set("Applying performance preset: 720p · JPEG 75%…")
+
+        def worker():
+            results = []
+            try:
+                for command, value in (("quality", "1"), ("jpeg", "75")):
+                    params = urlencode({"cmd": command, "value": value})
+                    req = Request(
+                        f"http://{self.host}:8080/control?{params}",
+                        headers={"Cache-Control": "no-cache"}
+                    )
+                    with urlopen(req, timeout=4) as response:
+                        results.append(response.read().decode("utf-8", errors="replace"))
+                message = "Performance preset applied · 720p / JPEG 75%"
+            except Exception as exc:
+                message = f"Could not apply full performance preset: {exc}"
+            try:
+                self.root.after(0, self.control_status.set, message)
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def disconnect(self, clear_status=True):
         self.running = False
