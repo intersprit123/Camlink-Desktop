@@ -225,7 +225,7 @@ class CamLinkDesktop:
             except Exception as exc:
                 if self.running:
                     self.root.after(0, self.set_error, str(exc))
-                    time.sleep(0.7)
+                    time.sleep(0.01)
 
     def show_frame(self, image):
         if not self.running:
