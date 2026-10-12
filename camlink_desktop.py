@@ -12,22 +12,22 @@ except ImportError:
     raise SystemExit("Pillow is required. Install it with: python -m pip install -r requirements.txt")
 
 
-BG = "#0b1020"
-PANEL = "#121a2d"
-PANEL_ALT = "#18233a"
-BORDER = "#263451"
-TEXT = "#f3f6ff"
-MUTED = "#98a7c4"
-ACCENT = "#6d8cff"
-GREEN = "#55dfb4"
+BG = "#0a0f1a"
+PANEL = "#111927"
+PANEL_ALT = "#192438"
+BORDER = "#28364c"
+TEXT = "#f4f7fb"
+MUTED = "#9aa9bd"
+ACCENT = "#4f7cff"
+GREEN = "#42d6ad"
 
 
 class CamLinkDesktop:
     def __init__(self, root):
         self.root = root
         self.root.title("CamLink | Desktop Camera")
-        self.root.geometry("1240x800")
-        self.root.minsize(760, 520)
+        self.root.geometry("1360x860")
+        self.root.minsize(900, 600)
         self.root.configure(bg=BG)
         self.running = False
         self.host = ""
@@ -66,15 +66,15 @@ class CamLinkDesktop:
         header.pack(fill="x", padx=22, pady=(18, 14))
         brand = tk.Frame(header, bg=BG)
         brand.pack(side="left", fill="x", expand=True)
-        tk.Label(brand, text="CamLink", bg=BG, fg=TEXT, font=("Segoe UI", 22, "bold")).pack(anchor="w")
-        tk.Label(brand, text="DESKTOP CAMERA STUDIO", bg=BG, fg=MUTED, font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(1, 0))
-        self.live_badge = tk.Label(header, text="●  DISCONNECTED", bg=PANEL_ALT, fg=MUTED, font=("Segoe UI", 9, "bold"), padx=12, pady=8)
+        tk.Label(brand, text="CamLink", bg=BG, fg=TEXT, font=("Segoe UI", 24, "bold")).pack(anchor="w")
+        tk.Label(brand, text="LIVE CAMERA  /  DESKTOP STUDIO", bg=BG, fg=MUTED, font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(1, 0))
+        self.live_badge = tk.Label(header, text="●  DISCONNECTED", bg=PANEL_ALT, fg=MUTED, font=("Segoe UI", 9, "bold"), padx=14, pady=9)
         self.live_badge.pack(side="right")
 
         body = tk.Frame(root, bg=BG)
         body.pack(fill="both", expand=True, padx=22, pady=(0, 12))
         self.body = body
-        self.sidebar = tk.Frame(body, bg=PANEL, width=300, highlightbackground=BORDER, highlightthickness=1)
+        self.sidebar = tk.Frame(body, bg=PANEL, width=320, highlightbackground=BORDER, highlightthickness=1)
         self.sidebar.pack(side="right", fill="y")
         self.sidebar.pack_propagate(False)
         self.build_sidebar()
@@ -89,9 +89,9 @@ class CamLinkDesktop:
         viewer = tk.Frame(body, bg=BG)
         viewer.pack(side="left", fill="both", expand=True)
         self.viewer = viewer
-        self.preview_border = tk.Frame(viewer, bg=BORDER, padx=1, pady=1)
+        self.preview_border = tk.Frame(viewer, bg=BORDER, padx=2, pady=2)
         self.preview_border.pack(fill="both", expand=True)
-        self.preview = tk.Label(self.preview_border, bg="#03060d", fg=MUTED,
+        self.preview = tk.Label(self.preview_border, bg="#050912", fg=MUTED,
                                 text="Your camera feed will appear here\n\nConnect to your phone to start viewing",
                                 font=("Segoe UI", 14), justify="center")
         self.preview.pack(fill="both", expand=True)
@@ -102,8 +102,8 @@ class CamLinkDesktop:
         self.fps_label = tk.Label(info, text="— FPS", bg=BG, fg=GREEN, font=("Segoe UI", 10, "bold"))
         self.fps_label.pack(side="right")
 
-        tk.Label(root, text="Private local-network viewer · Use only on a trusted Wi-Fi network",
-                 bg=BG, fg="#657493", font=("Segoe UI", 9)).pack(anchor="w", padx=24, pady=(0, 12))
+        tk.Label(root, text="CAMLINK  •  PRIVATE LOCAL NETWORK  •  USE ON A TRUSTED WI-FI NETWORK",
+                 bg=BG, fg="#71819b", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=24, pady=(0, 12))
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.preview.bind("<Configure>", self.redraw_last_image)
 
@@ -113,8 +113,8 @@ class CamLinkDesktop:
 
     def build_sidebar(self):
         self.section(self.sidebar, "Connection")
-        tk.Label(self.sidebar, text="Camera phone IP address", bg=PANEL, fg=TEXT,
-                 font=("Segoe UI", 10)).pack(anchor="w", padx=16)
+        tk.Label(self.sidebar, text="CAMERA PHONE ADDRESS", bg=PANEL, fg=MUTED,
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=16)
         self.ip = tk.StringVar(value="")
         self.ip_entry = ttk.Entry(self.sidebar, textvariable=self.ip)
         self.ip_entry.pack(fill="x", padx=16, pady=(6, 10))
