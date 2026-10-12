@@ -59,6 +59,28 @@ class CamLinkDesktop:
         self.zoom_label = ttk.Label(remote, text="1.0×")
         self.zoom_label.pack(side="left", padx=4)
         ttk.Button(remote, text="Apply zoom", command=lambda: self.send_control("zoom", self.zoom_value.get())).pack(side="left", padx=(8, 0))
+
+        quality_row = ttk.Frame(root, padding=(16, 0, 16, 8))
+        quality_row.pack(fill="x")
+        ttk.Label(quality_row, text="Capture resolution:").pack(side="left")
+        self.resolution = tk.StringVar(value="1080p")
+        self.resolution_box = ttk.Combobox(
+            quality_row, textvariable=self.resolution, state="readonly", width=18,
+            values=("480p", "720p", "1080p", "1440p / 2K", "2160p / 4K")
+        )
+        self.resolution_box.pack(side="left", padx=8)
+        ttk.Button(quality_row, text="Apply resolution", command=self.apply_resolution).pack(side="left", padx=4)
+
+        jpeg_row = ttk.Frame(root, padding=(16, 0, 16, 8))
+        jpeg_row.pack(fill="x")
+        ttk.Label(jpeg_row, text="JPEG quality:").pack(side="left")
+        self.jpeg_value = tk.IntVar(value=85)
+        self.jpeg_scale = ttk.Scale(jpeg_row, from_=50, to=95, command=self.on_jpeg_change)
+        self.jpeg_scale.set(85)
+        self.jpeg_scale.pack(side="left", fill="x", expand=True, padx=8)
+        self.jpeg_label = ttk.Label(jpeg_row, text="85%")
+        self.jpeg_label.pack(side="left", padx=4)
+        ttk.Button(jpeg_row, text="Apply quality", command=lambda: self.send_control("jpeg", int(self.jpeg_scale.get()))).pack(side="left", padx=4)
         ttk.Label(root, textvariable=self.control_status).pack(anchor="w", padx=18, pady=(0, 8))
 
         self.status = tk.StringVar(value="Not connected")
@@ -83,6 +105,17 @@ class CamLinkDesktop:
 
     def on_zoom_change(self, value):
         self.zoom_label.configure(text=f"{float(value):.1f}×")
+
+    def on_jpeg_change(self, value):
+        self.jpeg_label.configure(text=f"{int(float(value))}%")
+
+    def apply_resolution(self):
+        choices = ("480p", "720p", "1080p", "1440p / 2K", "2160p / 4K")
+        try:
+            index = choices.index(self.resolution.get())
+        except ValueError:
+            index = 2
+        self.send_control("quality", index)
 
     def send_control(self, command, value=None):
         if not self.running:
