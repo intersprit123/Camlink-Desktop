@@ -183,20 +183,49 @@ class CamLinkDesktop:
         self.worker = threading.Thread(target=self.fetch_loop, daemon=True)
         self.worker.start()
 
+    @staticmethod
+    def read_exact(stream, size):
+        data = bytearray()
+        while len(data) < size:
+            part = stream.read(size - len(data))
+            if not part:
+                raise ConnectionError('Stream ended')
+            data.extend(part)
+        return bytes(data)
+
     def fetch_loop(self):
         while self.running:
             try:
-                url = f"http://{self.host}:8080/frame?t={time.time_ns()}"
-                req = Request(url, headers={"Cache-Control": "no-cache"})
-                with urlopen(req, timeout=3) as response:
-                    data = response.read()
-                with Image.open(io.BytesIO(data)) as source:
-                    image = source.convert("RGB")
-                self.root.after(0, self.show_frame, image)
-                # No intentional frame delay: fetch the next frame as soon as this one finishes.
+                req = Request(f'http://{self.host}:8080/stream', headers={'Accept': 'multipart/x-mixed-replace'})
+                with urlopen(req, timeout=10) as response:
+                    while self.running:
+                        boundary = response.readline()
+                        if not boundary:
+                            raise ConnectionError('Stream ended')
+                        if not boundary.startswith(b'--frame'):
+                            continue
+                        headers = {}
+                        while True:
+                            line = response.readline()
+                            if not line:
+                                raise ConnectionError('Stream ended')
+                            if line in (b'\\r\\n', b'\\n'):
+                                break
+                            if b':' in line:
+                                key, value = line.decode('latin-1').split(':', 1)
+                                headers[key.strip().lower()] = value.strip()
+                        size = int(headers.get('content-length', '0'))
+                        if size <= 0 or size > 50000000:
+                            raise ConnectionError('Invalid JPEG size')
+                        jpeg = self.read_exact(response, size)
+                        response.read(2)
+                        with Image.open(io.BytesIO(jpeg)) as source:
+                            image = source.convert('RGB')
+                        self.root.after(0, self.show_frame, image)
             except Exception as exc:
-                self.root.after(0, self.set_error, str(exc))
-                time.sleep(0.7)
+                if self.running:
+                    self.root.after(0, self.set_error, str(exc))
+                    time.sleep(0.7)
 
     def show_frame(self, image):
         if not self.running:
