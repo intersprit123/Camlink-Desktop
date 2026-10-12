@@ -193,7 +193,7 @@ class CamLinkDesktop:
                 with Image.open(io.BytesIO(data)) as source:
                     image = source.convert("RGB")
                 self.root.after(0, self.show_frame, image)
-                time.sleep(0.02)
+                # No intentional frame delay: fetch the next frame as soon as this one finishes.
             except Exception as exc:
                 self.root.after(0, self.set_error, str(exc))
                 time.sleep(0.7)
