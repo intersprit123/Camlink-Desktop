@@ -1,8 +1,11 @@
 import io
+import json
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from datetime import datetime
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 from urllib.request import urlopen, Request
 from urllib.parse import urlencode
 
@@ -26,7 +29,10 @@ class CamLinkDesktop:
     def __init__(self, root):
         self.root = root
         self.root.title("CamLink | Desktop Camera")
-        self.root.geometry("1360x860")
+        self.settings_path = Path.home() / ".camlink_desktop.json"
+        self.settings = self.load_settings()
+        self.windowed_geometry = self.settings.get("geometry", "1360x860")
+        self.root.geometry(self.windowed_geometry)
         self.root.minsize(900, 600)
         self.root.configure(bg=BG)
         self.running = False
@@ -34,17 +40,25 @@ class CamLinkDesktop:
         self.worker = None
         self.frame_photo = None
         self.last_image = None
-        self.sidebar_visible = True
+        self.preview_mode = self.settings.get("preview_mode", "fit")
+        if self.preview_mode not in ("fit", "original"):
+            self.preview_mode = "fit"
+        self.fullscreen = False
+        self.sidebar_visible = bool(self.settings.get("sidebar_visible", True))
         self.frame_count = 0
         self.last_fps_time = time.monotonic()
         self.fps = 0
         self.control_status = tk.StringVar(value="Connect to a camera to unlock controls.")
         self.status = tk.StringVar(value="Ready to connect")
-        self.zoom_value = tk.DoubleVar(value=1.0)
-        self.exposure_value = tk.DoubleVar(value=0.0)
-        self.white_balance = tk.StringVar(value="auto")
-        self.jpeg_value = tk.IntVar(value=85)
-        self.resolution = tk.StringVar(value="1080p · Full HD")
+        self.zoom_value = tk.DoubleVar(value=self.safe_number("zoom", 1.0, 1.0, 10.0))
+        self.exposure_value = tk.DoubleVar(value=self.safe_number("exposure", 0.0, -3.0, 3.0))
+        self.white_balance = tk.StringVar(value=self.settings.get("white_balance", "auto"))
+        if self.white_balance.get() not in ("auto", "daylight", "cloudy", "incandescent", "fluorescent"):
+            self.white_balance.set("auto")
+        self.jpeg_value = tk.IntVar(value=int(self.safe_number("jpeg_quality", 85, 50, 95)))
+        self.resolution = tk.StringVar(value=self.settings.get("resolution", "1080p · Full HD"))
+        if self.resolution.get() not in ("480p · Low", "720p · HD", "1080p · Full HD", "1440p · 2K", "2160p · 4K"):
+            self.resolution.set("1080p · Full HD")
 
         style = ttk.Style()
         style.theme_use("clam")
@@ -97,8 +111,16 @@ class CamLinkDesktop:
                                 text="Your camera feed will appear here\n\nConnect to your phone to start viewing",
                                 font=("Segoe UI", 14), justify="center")
         self.preview.pack(fill="both", expand=True)
+        studio_tools = tk.Frame(viewer, bg=BG)
+        studio_tools.pack(fill="x", pady=(10, 0))
+        ttk.Button(studio_tools, text="Save snapshot", command=self.save_snapshot).pack(side="left")
+        ttk.Button(studio_tools, text="Fit to window", command=lambda: self.set_preview_mode("fit")).pack(side="left", padx=(7, 0))
+        ttk.Button(studio_tools, text="Original size", command=lambda: self.set_preview_mode("original")).pack(side="left", padx=(7, 0))
+        self.fullscreen_button = ttk.Button(studio_tools, text="Fullscreen  (F11)", command=self.toggle_fullscreen)
+        self.fullscreen_button.pack(side="right")
+
         info = tk.Frame(viewer, bg=BG)
-        info.pack(fill="x", pady=(12, 0))
+        info.pack(fill="x", pady=(10, 0))
         self.status_label = tk.Label(info, textvariable=self.status, bg=BG, fg=MUTED, font=("Segoe UI", 10))
         self.status_label.pack(side="left")
         self.fps_label = tk.Label(info, text="— FPS", bg=BG, fg=GREEN, font=("Segoe UI", 10, "bold"))
@@ -106,8 +128,12 @@ class CamLinkDesktop:
 
         tk.Label(root, text="CAMLINK  •  PRIVATE LOCAL NETWORK  •  USE ON A TRUSTED WI-FI NETWORK",
                  bg=BG, fg="#71819b", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=24, pady=(0, 12))
-        root.protocol("WM_DELETE_WINDOW", self.close)
+        self.root.bind("<F11>", self.toggle_fullscreen)
+        self.root.bind("<Escape>", self.exit_fullscreen)
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.preview.bind("<Configure>", self.redraw_last_image)
+        self.ip.set(str(self.settings.get("host", "")))
+        self.save_settings()
 
     def section(self, parent, title):
         tk.Label(parent, text=title.upper(), bg=PANEL, fg=MUTED,
@@ -117,7 +143,7 @@ class CamLinkDesktop:
         self.section(self.sidebar, "Connection")
         tk.Label(self.sidebar, text="CAMERA PHONE ADDRESS", bg=PANEL, fg=MUTED,
                  font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=16)
-        self.ip = tk.StringVar(value="")
+        self.ip = tk.StringVar(value=str(self.settings.get("host", "")))
         self.ip_entry = ttk.Entry(self.sidebar, textvariable=self.ip)
         self.ip_entry.pack(fill="x", padx=16, pady=(6, 10))
         buttons = tk.Frame(self.sidebar, bg=PANEL)
@@ -179,6 +205,7 @@ class CamLinkDesktop:
             self.sidebar.pack(side="right", fill="y", before=self.divider)
             self.toggle_button.configure(text="‹")
             self.sidebar_visible = True
+        self.save_settings()
 
     def connect(self):
         host = self.ip.get().strip()
@@ -187,6 +214,7 @@ class CamLinkDesktop:
             return
         self.disconnect(clear_status=False)
         self.host = host
+        self.save_settings()
         self.running = True
         self.connect_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
@@ -261,7 +289,8 @@ class CamLinkDesktop:
         width = max(self.preview.winfo_width(), 80)
         height = max(self.preview.winfo_height(), 80)
         image = self.last_image.copy()
-        image.thumbnail((width, height), Image.Resampling.LANCZOS)
+        if self.preview_mode == "fit":
+            image.thumbnail((width, height), Image.Resampling.LANCZOS)
         self.frame_photo = ImageTk.PhotoImage(image)
         self.preview.configure(image=self.frame_photo, text="")
 
@@ -271,6 +300,7 @@ class CamLinkDesktop:
             self.live_badge.configure(text="●  RETRYING", fg="#ffd479")
 
     def send_control(self, command, value=None):
+        self.save_settings()
         if not self.running:
             self.control_status.set("Connect to the camera phone first.")
             return
@@ -322,7 +352,101 @@ class CamLinkDesktop:
             self.live_badge.configure(text="●  DISCONNECTED", fg=MUTED)
             self.fps_label.configure(text="— FPS")
 
+    def safe_number(self, key, default, minimum, maximum):
+        try:
+            value = float(self.settings.get(key, default))
+        except (TypeError, ValueError):
+            value = float(default)
+        return max(minimum, min(maximum, value))
+
+    def load_settings(self):
+        try:
+            with self.settings_path.open("r", encoding="utf-8") as source:
+                data = json.load(source)
+            return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def save_settings(self):
+        if not hasattr(self, "settings_path"):
+            return
+        try:
+            geometry = getattr(self, "windowed_geometry", "1360x860")
+            if hasattr(self, "root") and not getattr(self, "fullscreen", False):
+                geometry = self.root.geometry()
+            settings = {
+                "host": self.ip.get().strip() if hasattr(self, "ip") else self.settings.get("host", ""),
+                "zoom": float(self.zoom_value.get()) if hasattr(self, "zoom_value") else 1.0,
+                "exposure": float(self.exposure_value.get()) if hasattr(self, "exposure_value") else 0.0,
+                "white_balance": self.white_balance.get() if hasattr(self, "white_balance") else "auto",
+                "jpeg_quality": int(self.jpeg_value.get()) if hasattr(self, "jpeg_value") else 85,
+                "resolution": self.resolution.get() if hasattr(self, "resolution") else "1080p · Full HD",
+                "preview_mode": getattr(self, "preview_mode", "fit"),
+                "sidebar_visible": getattr(self, "sidebar_visible", True),
+                "geometry": geometry
+            }
+            self.settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+            self.settings = settings
+        except (OSError, tk.TclError, ValueError):
+            # Settings persistence is best-effort; it must never interrupt the live preview.
+            pass
+
+    def set_preview_mode(self, mode):
+        if mode not in ("fit", "original"):
+            return
+        self.preview_mode = mode
+        self.redraw_last_image()
+        self.save_settings()
+        if mode == "fit":
+            self.status.set("Preview scaled to fit the window")
+        else:
+            self.status.set("Original pixel size · scroll/resize window to inspect")
+
+    def toggle_fullscreen(self, _event=None):
+        if not self.fullscreen:
+            try:
+                self.windowed_geometry = self.root.geometry()
+            except tk.TclError:
+                pass
+            self.fullscreen = True
+            self.root.attributes("-fullscreen", True)
+            self.fullscreen_button.configure(text="Exit fullscreen  (Esc)")
+        else:
+            self.exit_fullscreen()
+
+    def exit_fullscreen(self, _event=None):
+        if self.fullscreen:
+            self.fullscreen = False
+            self.root.attributes("-fullscreen", False)
+            self.root.geometry(self.windowed_geometry)
+            self.fullscreen_button.configure(text="Fullscreen  (F11)")
+            self.save_settings()
+
+    def save_snapshot(self):
+        if self.last_image is None:
+            messagebox.showinfo("CamLink", "Connect to the camera and wait for a frame before saving a snapshot.")
+            return
+        pictures = Path.home() / "Pictures"
+        initial_dir = pictures if pictures.is_dir() else Path.home()
+        filename = f"CamLink_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Save CamLink snapshot",
+            initialdir=str(initial_dir),
+            initialfile=filename,
+            defaultextension=".jpg",
+            filetypes=(("JPEG image", "*.jpg *.jpeg"), ("PNG image", "*.png"), ("All files", "*.*"))
+        )
+        if not path:
+            return
+        try:
+            self.last_image.save(path)
+            self.status.set(f"Snapshot saved: {path}")
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("CamLink", f"Could not save snapshot:\\n{exc}")
+
     def close(self):
+        self.save_settings()
         self.disconnect()
         self.root.destroy()
 
