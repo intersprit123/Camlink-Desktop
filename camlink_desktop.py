@@ -34,9 +34,6 @@ class CamLinkDesktop:
         self.worker = None
         self.frame_photo = None
         self.last_image = None
-        self.frame_queue_lock = threading.Lock()
-        self.pending_frame = None
-        self.frame_update_scheduled = False
         self.sidebar_visible = True
         self.frame_count = 0
         self.last_fps_time = time.monotonic()
@@ -78,12 +75,12 @@ class CamLinkDesktop:
         body.pack(fill="both", expand=True, padx=22, pady=(0, 12))
         self.body = body
         self.sidebar = tk.Frame(body, bg=PANEL, width=300, highlightbackground=BORDER, highlightthickness=1)
-        self.sidebar.pack(side="left", fill="y")
+        self.sidebar.pack(side="right", fill="y")
         self.sidebar.pack_propagate(False)
         self.build_sidebar()
 
         self.divider = tk.Frame(body, bg=BG, width=34)
-        self.divider.pack(side="left", fill="y")
+        self.divider.pack(side="right", fill="y")
         self.toggle_button = tk.Button(self.divider, text="‹", command=self.toggle_sidebar, bg=PANEL_ALT, fg=TEXT,
                                        activebackground=ACCENT, activeforeground="#ffffff", relief="flat",
                                        bd=0, font=("Segoe UI", 17, "bold"), cursor="hand2", width=2)
@@ -167,7 +164,7 @@ class CamLinkDesktop:
             self.toggle_button.configure(text="›")
             self.sidebar_visible = False
         else:
-            self.sidebar.pack(side="left", fill="y", before=self.divider)
+            self.sidebar.pack(side="right", fill="y", before=self.divider)
             self.toggle_button.configure(text="‹")
             self.sidebar_visible = True
 
@@ -224,27 +221,11 @@ class CamLinkDesktop:
                         response.read(2)
                         with Image.open(io.BytesIO(jpeg)) as source:
                             image = source.convert('RGB')
-                        # Keep only the newest decoded frame; never flood Tk's event queue.
-                        schedule_update = False
-                        with self.frame_queue_lock:
-                            self.pending_frame = image
-                            if not self.frame_update_scheduled:
-                                self.frame_update_scheduled = True
-                                schedule_update = True
-                        if schedule_update:
-                            self.root.after(0, self.process_pending_frame)
+                        self.root.after(0, self.show_frame, image)
             except Exception as exc:
                 if self.running:
                     self.root.after(0, self.set_error, str(exc))
                     time.sleep(0.01)
-
-    def process_pending_frame(self):
-        with self.frame_queue_lock:
-            image = self.pending_frame
-            self.pending_frame = None
-            self.frame_update_scheduled = False
-        if image is not None and self.running:
-            self.show_frame(image)
 
     def show_frame(self, image):
         if not self.running:
