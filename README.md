@@ -26,7 +26,13 @@ GitHub Actions builds the Windows executable automatically when changes are push
 - **Fullscreen** or **F11** toggles fullscreen; **Esc** exits fullscreen.
 - The last camera IP, zoom, exposure, white balance, JPEG quality, resolution selection, preview mode, sidebar visibility, and window size are saved to `~/.camlink_desktop.json` (your Windows home folder). Settings are restored on the next launch.
 
-The desktop viewer uses a continuous multipart MJPEG stream (`/stream`) plus the control endpoint on port 8080, avoiding a separate HTTP request for every frame. The stream is JPEG-based; actual FPS and latency depend on the phone, encoding, Wi-Fi and PC. The preview preserves the incoming frame's aspect ratio, and the Android service rotates frames using CameraX orientation metadata. The settings sidebar can be collapsed to give the camera more space. Resolution choices (480p, 720p, 1080p, 2K, 4K) are requests; actual capture resolution depends on phone and CameraX support. JPEG quality is adjustable from 50–95%. Higher settings may increase lag, heat, battery use, and Wi-Fi bandwidth. This is an early prototype, not encrypted and without pairing authentication. Use only on a trusted local network; do not port-forward the camera server to the internet.
+## Performance-first streaming
+
+The desktop reader keeps a single newest-frame slot instead of decoding every JPEG and queuing one UI callback per frame. It decodes at the preview refresh rate (about 60 Hz), drops stale frames instead of accumulating delay, uses faster bilinear scaling, and updates telemetry once per second. The preview reports received FPS, decode time, and estimated stream payload bitrate. Received FPS is not the same as displayed FPS, and decode time is not end-to-end network latency.
+
+The Android service defaults to 720p and JPEG quality 75 to favor smoothness, lower CPU load, and reduced Wi-Fi bandwidth. Use **⚡ Max FPS preset** in the desktop or web controls to request 720p / JPEG 75 from the camera phone. Higher resolution and quality remain selectable when image detail matters more than smoothness. Capture rate depends on the phone camera, device load, network and PC.
+
+CamLink uses continuous multipart MJPEG (`/stream`) and the control endpoint on port 8080. It is simpler to use but is still CPU-heavy compared with a hardware-encoded H.264 pipeline; hardware video encoding remains a potential next major upgrade. The preview preserves incoming aspect ratio, and the Android service rotates frames according to CameraX orientation metadata. This is an early prototype, not encrypted and without pairing authentication. Use only on a trusted local network; do not port-forward the camera server to the internet.
 
 ## Build locally
 
