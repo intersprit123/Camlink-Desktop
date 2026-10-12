@@ -64,8 +64,8 @@ class CamLinkDesktop:
         self.white_balance = tk.StringVar(value=self.settings.get("white_balance", "auto"))
         if self.white_balance.get() not in ("auto", "daylight", "cloudy", "incandescent", "fluorescent"):
             self.white_balance.set("auto")
-        self.jpeg_value = tk.IntVar(value=int(self.safe_number("jpeg_quality", 85, 50, 95)))
-        self.resolution = tk.StringVar(value=self.settings.get("resolution", "1080p · Full HD"))
+        self.jpeg_value = tk.IntVar(value=int(self.safe_number("jpeg_quality", 75, 50, 95)))
+        self.resolution = tk.StringVar(value=self.settings.get("resolution", "720p · HD"))
         if self.resolution.get() not in ("480p · Low", "720p · HD", "1080p · Full HD", "1440p · 2K", "2160p · 4K"):
             self.resolution.set("1080p · Full HD")
 
@@ -451,7 +451,7 @@ class CamLinkDesktop:
                 "exposure": float(self.exposure_value.get()) if hasattr(self, "exposure_value") else 0.0,
                 "white_balance": self.white_balance.get() if hasattr(self, "white_balance") else "auto",
                 "jpeg_quality": int(self.jpeg_value.get()) if hasattr(self, "jpeg_value") else 85,
-                "resolution": self.resolution.get() if hasattr(self, "resolution") else "1080p · Full HD",
+                "resolution": self.resolution.get() if hasattr(self, "resolution") else "720p · HD",
                 "preview_mode": getattr(self, "preview_mode", "fit"),
                 "sidebar_visible": getattr(self, "sidebar_visible", True),
                 "geometry": geometry
