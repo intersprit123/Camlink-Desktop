@@ -17,9 +17,16 @@ GitHub Actions builds the Windows executable automatically when changes are push
 2. On the Android phone, open CamLink, choose **Share this phone's camera**, grant camera permission, and start sharing.
 3. Note the IP address shown by the phone.
 4. Open CamLink Desktop, enter that IP address, and click **Connect**.
-5. Use **Switch front / rear**, **Flashlight on / off**, **Apply zoom**, **Apply resolution**, and **Apply quality** to control the phone camera where supported.
+5. Use **Flip**, **Flash**, **Focus**, the zoom and exposure sliders, the white-balance picker, and image-quality controls where the camera supports them.
 
-The desktop viewer now uses a continuous multipart MJPEG stream (`/stream`) plus the control endpoint on port 8080, avoiding a separate HTTP request for every frame. The stream is still JPEG-based, so it reduces request overhead but is not a guarantee of sub-millisecond latency; actual FPS and latency depend on the phone, encoding, Wi-Fi and PC. The preview preserves the incoming frame's aspect ratio, and the Android service rotates frames using CameraX orientation metadata so portrait phone video can appear portrait on the desktop. The settings sidebar collapses with the small arrow beside the preview to give the camera more screen space. Resolution choices (480p, 720p, 1080p, 2K, 4K) are requests; actual capture resolution depends on the phone and CameraX support. JPEG quality is adjustable from 50–95%. Higher settings may increase lag, heat, battery use, and Wi-Fi bandwidth. This is an early prototype, not encrypted and without pairing authentication. Use only on a trusted local network; do not port-forward the camera server to the internet.
+## Desktop studio shortcuts and tools
+
+- **Save snapshot** saves the latest received full-resolution frame as JPEG or PNG to a location you choose.
+- **Fit to window** scales the preview to the available panel; **Original size** displays the received pixels without resizing.
+- **Fullscreen** or **F11** toggles fullscreen; **Esc** exits fullscreen.
+- The last camera IP, zoom, exposure, white balance, JPEG quality, resolution selection, preview mode, sidebar visibility, and window size are saved to `~/.camlink_desktop.json` (your Windows home folder). Settings are restored on the next launch.
+
+The desktop viewer uses a continuous multipart MJPEG stream (`/stream`) plus the control endpoint on port 8080, avoiding a separate HTTP request for every frame. The stream is JPEG-based; actual FPS and latency depend on the phone, encoding, Wi-Fi and PC. The preview preserves the incoming frame's aspect ratio, and the Android service rotates frames using CameraX orientation metadata. The settings sidebar can be collapsed to give the camera more space. Resolution choices (480p, 720p, 1080p, 2K, 4K) are requests; actual capture resolution depends on phone and CameraX support. JPEG quality is adjustable from 50–95%. Higher settings may increase lag, heat, battery use, and Wi-Fi bandwidth. This is an early prototype, not encrypted and without pairing authentication. Use only on a trusted local network; do not port-forward the camera server to the internet.
 
 ## Build locally
 
