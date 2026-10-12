@@ -45,9 +45,18 @@ class CamLinkDesktop:
             self.preview_mode = "fit"
         self.fullscreen = False
         self.sidebar_visible = bool(self.settings.get("sidebar_visible", True))
-        self.frame_count = 0
-        self.last_fps_time = time.monotonic()
-        self.fps = 0
+        self.pending_jpeg_lock = threading.Lock()
+        self.pending_jpeg = None
+        self.pending_sequence = 0
+        self.displayed_sequence = 0
+        self.received_frames = 0
+        self.received_bytes = 0
+        self.received_fps = 0.0
+        self.received_mbps = 0.0
+        self.decode_ms = 0.0
+        self.last_stats_time = time.monotonic()
+        self.retry_delay = 0.10
+        self.preview_tick_id = None
         self.control_status = tk.StringVar(value="Connect to a camera to unlock controls.")
         self.status = tk.StringVar(value="Ready to connect")
         self.zoom_value = tk.DoubleVar(value=self.safe_number("zoom", 1.0, 1.0, 10.0))
@@ -137,6 +146,7 @@ class CamLinkDesktop:
         self.preview.bind("<Configure>", self.redraw_last_image)
         self.ip.set(str(self.settings.get("host", "")))
         self.save_settings()
+        self.preview_tick_id = self.root.after(16, self.consume_latest_frame)
 
     def section(self, parent, title):
         tk.Label(parent, text=title.upper(), bg=PANEL, fg=MUTED,
@@ -237,53 +247,106 @@ class CamLinkDesktop:
         return bytes(data)
 
     def fetch_loop(self):
+        retry_delay = 0.10
         while self.running:
             try:
-                req = Request(f'http://{self.host}:8080/stream', headers={'Accept': 'multipart/x-mixed-replace'})
+                req = Request(
+                    f"http://{self.host}:8080/stream",
+                    headers={"Accept": "multipart/x-mixed-replace", "Cache-Control": "no-cache"}
+                )
                 with urlopen(req, timeout=10) as response:
+                    retry_delay = 0.10
                     while self.running:
                         boundary = response.readline()
                         if not boundary:
-                            raise ConnectionError('Stream ended')
-                        if not boundary.startswith(b'--frame'):
+                            raise ConnectionError("Stream ended")
+                        if not boundary.startswith(b"--frame"):
                             continue
+
                         headers = {}
                         while True:
                             line = response.readline()
                             if not line:
-                                raise ConnectionError('Stream ended')
-                            if line in (b'\r\n', b'\n'):
+                                raise ConnectionError("Stream ended")
+                            if line in (b"\\r\\n", b"\\n"):
                                 break
-                            if b':' in line:
-                                key, value = line.decode('latin-1').split(':', 1)
+                            if b":" in line:
+                                key, value = line.decode("latin-1").split(":", 1)
                                 headers[key.strip().lower()] = value.strip()
-                        size = int(headers.get('content-length', '0'))
-                        if size <= 0 or size > 50000000:
-                            raise ConnectionError('Invalid JPEG size')
+
+                        size = int(headers.get("content-length", "0"))
+                        if size <= 0 or size > 50_000_000:
+                            raise ConnectionError("Invalid JPEG size")
                         jpeg = self.read_exact(response, size)
-                        response.read(2)
-                        with Image.open(io.BytesIO(jpeg)) as source:
-                            image = source.convert('RGB')
-                        self.root.after(0, self.show_frame, image)
+                        self.read_exact(response, 2)  # multipart CRLF separator
+
+                        # Keep only the newest compressed frame. Do not decode every frame
+                        # or enqueue Tk callbacks; slow displays must never build frame lag.
+                        with self.pending_jpeg_lock:
+                            self.pending_jpeg = jpeg
+                            self.pending_sequence += 1
+                            self.received_frames += 1
+                            self.received_bytes += len(jpeg)
             except Exception as exc:
                 if self.running:
-                    self.root.after(0, self.set_error, str(exc))
-                    time.sleep(0.01)
+                    try:
+                        self.root.after(0, self.set_error, str(exc))
+                    except tk.TclError:
+                        return
+                    time.sleep(retry_delay)
+                    retry_delay = min(0.75, retry_delay * 1.7)
+
+    def consume_latest_frame(self):
+        if not self.root.winfo_exists():
+            return
+
+        jpeg = None
+        sequence = 0
+        with self.pending_jpeg_lock:
+            if self.pending_sequence != self.displayed_sequence and self.pending_jpeg is not None:
+                jpeg = self.pending_jpeg
+                sequence = self.pending_sequence
+            now = time.monotonic()
+            elapsed = now - self.last_stats_time
+            if elapsed >= 1.0:
+                frames = self.received_frames
+                byte_count = self.received_bytes
+                self.received_frames = 0
+                self.received_bytes = 0
+                self.last_stats_time = now
+                self.received_fps = frames / elapsed
+                self.received_mbps = (byte_count * 8 / elapsed) / 1_000_000
+
+        if jpeg is not None:
+            self.displayed_sequence = sequence
+            started = time.perf_counter()
+            try:
+                with Image.open(io.BytesIO(jpeg)) as source:
+                    image = source.convert("RGB")
+                self.decode_ms = (time.perf_counter() - started) * 1000.0
+                self.show_frame(image)
+            except Exception as exc:
+                self.status.set(f"Received an invalid frame: {exc}")
+
+        if self.running:
+            self.fps_label.configure(
+                text=f"{self.received_fps:.0f} RX FPS · {self.decode_ms:.1f} ms decode"
+            )
+            if self.received_fps > 0:
+                self.status.set(
+                    f"Connected to {self.host}:8080  ·  {self.received_mbps:.1f} Mbps"
+                )
+            try:
+                self.preview_tick_id = self.root.after(16, self.consume_latest_frame)
+            except tk.TclError:
+                self.preview_tick_id = None
+
 
     def show_frame(self, image):
         if not self.running:
             return
         self.last_image = image
-        self.frame_count += 1
-        now = time.monotonic()
-        elapsed = now - self.last_fps_time
-        if elapsed >= 1:
-            self.fps = self.frame_count / elapsed
-            self.frame_count = 0
-            self.last_fps_time = now
-            self.fps_label.configure(text=f"{self.fps:.0f} FPS")
         self.redraw_last_image()
-        self.status.set(f"Connected to {self.host}:8080")
         self.live_badge.configure(text="●  LIVE", fg=GREEN)
 
     def redraw_last_image(self, _event=None):
@@ -293,7 +356,8 @@ class CamLinkDesktop:
         height = max(self.preview.winfo_height(), 80)
         image = self.last_image.copy()
         if self.preview_mode == "fit":
-            image.thumbnail((width, height), Image.Resampling.LANCZOS)
+            # Bilinear resampling is much cheaper than Lanczos for a continuously updating preview.
+            image.thumbnail((width, height), Image.Resampling.BILINEAR)
         self.frame_photo = ImageTk.PhotoImage(image)
         self.preview.configure(image=self.frame_photo, text="")
 
@@ -343,6 +407,10 @@ class CamLinkDesktop:
 
     def disconnect(self, clear_status=True):
         self.running = False
+        with self.pending_jpeg_lock:
+            self.pending_jpeg = None
+            self.pending_sequence += 1
+            self.displayed_sequence = self.pending_sequence
         if hasattr(self, "connect_button"):
             self.connect_button.configure(state="normal")
             self.stop_button.configure(state="disabled")
