@@ -4,7 +4,6 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 from urllib.request import urlopen, Request
-from urllib.error import URLError
 from urllib.parse import urlencode
 
 try:
@@ -13,109 +12,222 @@ except ImportError:
     raise SystemExit("Pillow is required. Install it with: python -m pip install -r requirements.txt")
 
 
+BG = "#0b1020"
+PANEL = "#121a2d"
+PANEL_ALT = "#18233a"
+BORDER = "#263451"
+TEXT = "#f3f6ff"
+MUTED = "#98a7c4"
+ACCENT = "#6d8cff"
+GREEN = "#55dfb4"
+
+
 class CamLinkDesktop:
     def __init__(self, root):
         self.root = root
-        self.root.title("CamLink Desktop")
-        self.root.geometry("960x680")
-        self.root.minsize(640, 480)
-        self.root.configure(bg="#101525")
+        self.root.title("CamLink | Desktop Camera")
+        self.root.geometry("1240x800")
+        self.root.minsize(760, 520)
+        self.root.configure(bg=BG)
         self.running = False
+        self.host = ""
         self.worker = None
         self.frame_photo = None
-        self.control_status = tk.StringVar(value="Controls require a connected CamLink camera phone.")
+        self.last_image = None
+        self.sidebar_visible = True
+        self.frame_count = 0
+        self.last_fps_time = time.monotonic()
+        self.fps = 0
+        self.control_status = tk.StringVar(value="Connect to a camera to unlock controls.")
+        self.status = tk.StringVar(value="Ready to connect")
         self.zoom_value = tk.DoubleVar(value=1.0)
+        self.jpeg_value = tk.IntVar(value=85)
+        self.resolution = tk.StringVar(value="1080p · Full HD")
 
         style = ttk.Style()
         style.theme_use("clam")
-        style.configure("TFrame", background="#101525")
-        style.configure("TLabel", background="#101525", foreground="#f4f6ff", font=("Segoe UI", 11))
-        style.configure("Title.TLabel", font=("Segoe UI", 22, "bold"))
-        style.configure("TButton", font=("Segoe UI", 10), padding=8)
+        style.configure("TFrame", background=BG)
+        style.configure("Panel.TFrame", background=PANEL)
+        style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 10))
+        style.configure("Muted.TLabel", background=BG, foreground=MUTED, font=("Segoe UI", 10))
+        style.configure("Panel.TLabel", background=PANEL, foreground=TEXT, font=("Segoe UI", 10))
+        style.configure("Heading.TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 21, "bold"))
+        style.configure("Section.TLabel", background=PANEL, foreground=TEXT, font=("Segoe UI", 11, "bold"))
+        style.configure("TButton", font=("Segoe UI", 10), padding=(10, 8), background=PANEL_ALT, foreground=TEXT, borderwidth=0)
+        style.map("TButton", background=[("active", "#263858"), ("disabled", "#182033")])
+        style.configure("Accent.TButton", background=ACCENT, foreground="#ffffff", font=("Segoe UI", 10, "bold"))
+        style.map("Accent.TButton", background=[("active", "#829cff")])
+        style.configure("TEntry", fieldbackground=PANEL_ALT, foreground=TEXT, insertcolor=TEXT, padding=8)
+        style.configure("TCombobox", fieldbackground=PANEL_ALT, background=PANEL_ALT, foreground=TEXT, padding=7)
+        style.map("TCombobox", fieldbackground=[("readonly", PANEL_ALT)], foreground=[("readonly", TEXT)])
+        style.configure("Horizontal.TScale", background=PANEL)
 
-        top = ttk.Frame(root, padding=16)
-        top.pack(fill="x")
-        ttk.Label(top, text="CamLink Desktop", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(top, text="View a CamLink camera phone on the same trusted Wi-Fi network.").pack(anchor="w", pady=(4, 12))
+        header = tk.Frame(root, bg=BG)
+        header.pack(fill="x", padx=22, pady=(18, 14))
+        brand = tk.Frame(header, bg=BG)
+        brand.pack(side="left", fill="x", expand=True)
+        tk.Label(brand, text="CamLink", bg=BG, fg=TEXT, font=("Segoe UI", 22, "bold")).pack(anchor="w")
+        tk.Label(brand, text="DESKTOP CAMERA STUDIO", bg=BG, fg=MUTED, font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(1, 0))
+        self.live_badge = tk.Label(header, text="●  DISCONNECTED", bg=PANEL_ALT, fg=MUTED, font=("Segoe UI", 9, "bold"), padx=12, pady=8)
+        self.live_badge.pack(side="right")
 
-        controls = ttk.Frame(root, padding=(16, 0, 16, 12))
-        controls.pack(fill="x")
-        ttk.Label(controls, text="Camera phone IP:").pack(side="left")
-        self.ip = tk.StringVar(value="192.168.1.10")
-        self.ip_entry = ttk.Entry(controls, textvariable=self.ip, width=22)
-        self.ip_entry.pack(side="left", padx=(8, 12))
-        self.connect_button = ttk.Button(controls, text="Connect", command=self.connect)
-        self.connect_button.pack(side="left")
-        self.stop_button = ttk.Button(controls, text="Disconnect", command=self.disconnect, state="disabled")
-        self.stop_button.pack(side="left", padx=8)
+        body = tk.Frame(root, bg=BG)
+        body.pack(fill="both", expand=True, padx=22, pady=(0, 12))
+        self.body = body
+        self.sidebar = tk.Frame(body, bg=PANEL, width=300, highlightbackground=BORDER, highlightthickness=1)
+        self.sidebar.pack(side="left", fill="y")
+        self.sidebar.pack_propagate(False)
+        self.build_sidebar()
 
-        remote = ttk.LabelFrame(root, text="Remote camera controls", padding=12)
-        remote.pack(fill="x", padx=16, pady=(0, 10))
-        ttk.Button(remote, text="Switch front / rear", command=lambda: self.send_control("switch")).pack(side="left", padx=(0, 8))
-        ttk.Button(remote, text="Flashlight on / off", command=lambda: self.send_control("torch")).pack(side="left", padx=(0, 8))
-        ttk.Label(remote, text="Zoom").pack(side="left", padx=(8, 4))
-        self.zoom_scale = ttk.Scale(remote, from_=1.0, to=4.0, variable=self.zoom_value, command=self.on_zoom_change)
-        self.zoom_scale.pack(side="left", fill="x", expand=True, padx=6)
-        self.zoom_label = ttk.Label(remote, text="1.0×")
-        self.zoom_label.pack(side="left", padx=4)
-        ttk.Button(remote, text="Apply zoom", command=lambda: self.send_control("zoom", self.zoom_value.get())).pack(side="left", padx=(8, 0))
+        self.divider = tk.Frame(body, bg=BG, width=34)
+        self.divider.pack(side="left", fill="y")
+        self.toggle_button = tk.Button(self.divider, text="‹", command=self.toggle_sidebar, bg=PANEL_ALT, fg=TEXT,
+                                       activebackground=ACCENT, activeforeground="#ffffff", relief="flat",
+                                       bd=0, font=("Segoe UI", 17, "bold"), cursor="hand2", width=2)
+        self.toggle_button.place(relx=0.5, rely=0.5, anchor="center")
 
-        quality_row = ttk.Frame(root, padding=(16, 0, 16, 8))
-        quality_row.pack(fill="x")
-        ttk.Label(quality_row, text="Capture resolution:").pack(side="left")
-        self.resolution = tk.StringVar(value="1080p")
-        self.resolution_box = ttk.Combobox(
-            quality_row, textvariable=self.resolution, state="readonly", width=18,
-            values=("480p", "720p", "1080p", "1440p / 2K", "2160p / 4K")
-        )
-        self.resolution_box.pack(side="left", padx=8)
-        ttk.Button(quality_row, text="Apply resolution", command=self.apply_resolution).pack(side="left", padx=4)
+        viewer = tk.Frame(body, bg=BG)
+        viewer.pack(side="left", fill="both", expand=True)
+        self.viewer = viewer
+        self.preview_border = tk.Frame(viewer, bg=BORDER, padx=1, pady=1)
+        self.preview_border.pack(fill="both", expand=True)
+        self.preview = tk.Label(self.preview_border, bg="#03060d", fg=MUTED,
+                                text="Your camera feed will appear here\n\nConnect to your phone to start viewing",
+                                font=("Segoe UI", 14), justify="center")
+        self.preview.pack(fill="both", expand=True)
+        info = tk.Frame(viewer, bg=BG)
+        info.pack(fill="x", pady=(12, 0))
+        self.status_label = tk.Label(info, textvariable=self.status, bg=BG, fg=MUTED, font=("Segoe UI", 10))
+        self.status_label.pack(side="left")
+        self.fps_label = tk.Label(info, text="— FPS", bg=BG, fg=GREEN, font=("Segoe UI", 10, "bold"))
+        self.fps_label.pack(side="right")
 
-        jpeg_row = ttk.Frame(root, padding=(16, 0, 16, 8))
-        jpeg_row.pack(fill="x")
-        ttk.Label(jpeg_row, text="JPEG quality:").pack(side="left")
-        self.jpeg_value = tk.IntVar(value=85)
-        self.jpeg_scale = ttk.Scale(jpeg_row, from_=50, to=95, command=self.on_jpeg_change)
-        self.jpeg_scale.set(85)
-        self.jpeg_scale.pack(side="left", fill="x", expand=True, padx=8)
-        self.jpeg_label = ttk.Label(jpeg_row, text="85%")
-        self.jpeg_label.pack(side="left", padx=4)
-        ttk.Button(jpeg_row, text="Apply quality", command=lambda: self.send_control("jpeg", int(self.jpeg_scale.get()))).pack(side="left", padx=4)
-        ttk.Label(root, textvariable=self.control_status).pack(anchor="w", padx=18, pady=(0, 8))
-
-        self.status = tk.StringVar(value="Not connected")
-        ttk.Label(root, textvariable=self.status).pack(anchor="w", padx=18, pady=(0, 8))
-
-        self.screen = tk.Label(root, bg="#05070d", fg="#c4cbe0", text="Camera preview will appear here", font=("Segoe UI", 14))
-        self.screen.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        tk.Label(root, text="Private local-network viewer · Use only on a trusted Wi-Fi network",
+                 bg=BG, fg="#657493", font=("Segoe UI", 9)).pack(anchor="w", padx=24, pady=(0, 12))
         root.protocol("WM_DELETE_WINDOW", self.close)
+        self.preview.bind("<Configure>", self.redraw_last_image)
+
+    def section(self, parent, title):
+        tk.Label(parent, text=title.upper(), bg=PANEL, fg=MUTED,
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=16, pady=(17, 8))
+
+    def build_sidebar(self):
+        self.section(self.sidebar, "Connection")
+        tk.Label(self.sidebar, text="Camera phone IP address", bg=PANEL, fg=TEXT,
+                 font=("Segoe UI", 10)).pack(anchor="w", padx=16)
+        self.ip = tk.StringVar(value="")
+        self.ip_entry = ttk.Entry(self.sidebar, textvariable=self.ip)
+        self.ip_entry.pack(fill="x", padx=16, pady=(6, 10))
+        buttons = tk.Frame(self.sidebar, bg=PANEL)
+        buttons.pack(fill="x", padx=16)
+        self.connect_button = ttk.Button(buttons, text="Connect", style="Accent.TButton", command=self.connect)
+        self.connect_button.pack(side="left", fill="x", expand=True)
+        self.stop_button = ttk.Button(buttons, text="Stop", command=self.disconnect, state="disabled")
+        self.stop_button.pack(side="left", padx=(8, 0))
+
+        self.section(self.sidebar, "Camera")
+        row = tk.Frame(self.sidebar, bg=PANEL)
+        row.pack(fill="x", padx=16)
+        ttk.Button(row, text="↻  Flip camera", command=lambda: self.send_control("switch")).pack(fill="x", expand=True, side="left")
+        ttk.Button(row, text="☼  Flash", command=lambda: self.send_control("torch")).pack(fill="x", expand=True, side="left", padx=(7, 0))
+
+        self.make_slider("Zoom", self.zoom_value, 1, 4, lambda v: f"{float(v):.1f}×", self.apply_zoom)
+        self.section(self.sidebar, "Image quality")
+        tk.Label(self.sidebar, text="Capture resolution", bg=PANEL, fg=TEXT, font=("Segoe UI", 10)).pack(anchor="w", padx=16)
+        self.resolution_box = ttk.Combobox(self.sidebar, textvariable=self.resolution, state="readonly",
+                                           values=("480p · Low", "720p · HD", "1080p · Full HD", "1440p · 2K", "2160p · 4K"))
+        self.resolution_box.pack(fill="x", padx=16, pady=(6, 8))
+        ttk.Button(self.sidebar, text="Apply resolution", command=self.apply_resolution).pack(fill="x", padx=16)
+
+        self.make_slider("JPEG quality", self.jpeg_value, 50, 95, lambda v: f"{int(float(v))}%", self.apply_jpeg, integer=True)
+        tk.Label(self.sidebar, text="Higher quality uses more Wi-Fi bandwidth.\n4K depends on phone support.",
+                 bg=PANEL, fg=MUTED, justify="left", font=("Segoe UI", 9), wraplength=255).pack(anchor="w", padx=16, pady=(5, 12))
+        tk.Frame(self.sidebar, bg=BORDER, height=1).pack(fill="x", padx=16, pady=(5, 10))
+        tk.Label(self.sidebar, textvariable=self.control_status, bg=PANEL, fg=GREEN,
+                 wraplength=255, justify="left", font=("Segoe UI", 9)).pack(anchor="w", padx=16, pady=(0, 14))
+
+    def make_slider(self, title, variable, start, end, formatter, apply, integer=False):
+        row = tk.Frame(self.sidebar, bg=PANEL)
+        row.pack(fill="x", padx=16, pady=(0, 4))
+        tk.Label(row, text=title, bg=PANEL, fg=TEXT, font=("Segoe UI", 10)).pack(side="left")
+        value_label = tk.Label(row, text=formatter(variable.get()), bg=PANEL, fg=GREEN,
+                               font=("Segoe UI", 10, "bold"))
+        value_label.pack(side="right")
+        scale = ttk.Scale(self.sidebar, from_=start, to=end, variable=variable)
+        scale.pack(fill="x", padx=16, pady=(0, 3))
+        scale.configure(command=lambda value: value_label.configure(text=formatter(value)))
+        ttk.Button(self.sidebar, text=f"Apply {title.lower()}", command=apply).pack(fill="x", padx=16, pady=(3, 0))
+
+    def toggle_sidebar(self):
+        if self.sidebar_visible:
+            self.sidebar.pack_forget()
+            self.toggle_button.configure(text="›")
+            self.sidebar_visible = False
+        else:
+            self.sidebar.pack(side="left", fill="y", before=self.divider)
+            self.toggle_button.configure(text="‹")
+            self.sidebar_visible = True
 
     def connect(self):
         host = self.ip.get().strip()
         if not host or any(c in host for c in "/ :"):
-            messagebox.showerror("CamLink", "Enter only the camera phone's IP address, such as 192.168.1.12.")
+            messagebox.showerror("CamLink", "Enter the camera phone's IP address, for example 192.168.1.12.")
             return
+        self.disconnect(clear_status=False)
         self.host = host
         self.running = True
         self.connect_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.status.set(f"Connecting to {host}:8080…")
+        self.live_badge.configure(text="●  CONNECTING", fg="#ffd479")
         self.worker = threading.Thread(target=self.fetch_loop, daemon=True)
         self.worker.start()
 
-    def on_zoom_change(self, value):
-        self.zoom_label.configure(text=f"{float(value):.1f}×")
+    def fetch_loop(self):
+        while self.running:
+            try:
+                url = f"http://{self.host}:8080/frame?t={time.time_ns()}"
+                req = Request(url, headers={"Cache-Control": "no-cache"})
+                with urlopen(req, timeout=3) as response:
+                    data = response.read()
+                with Image.open(io.BytesIO(data)) as source:
+                    image = source.convert("RGB")
+                self.root.after(0, self.show_frame, image)
+                time.sleep(0.02)
+            except Exception as exc:
+                self.root.after(0, self.set_error, str(exc))
+                time.sleep(0.7)
 
-    def on_jpeg_change(self, value):
-        self.jpeg_label.configure(text=f"{int(float(value))}%")
+    def show_frame(self, image):
+        if not self.running:
+            return
+        self.last_image = image
+        self.frame_count += 1
+        now = time.monotonic()
+        elapsed = now - self.last_fps_time
+        if elapsed >= 1:
+            self.fps = self.frame_count / elapsed
+            self.frame_count = 0
+            self.last_fps_time = now
+            self.fps_label.configure(text=f"{self.fps:.0f} FPS")
+        self.redraw_last_image()
+        self.status.set(f"Connected to {self.host}:8080")
+        self.live_badge.configure(text="●  LIVE", fg=GREEN)
 
-    def apply_resolution(self):
-        choices = ("480p", "720p", "1080p", "1440p / 2K", "2160p / 4K")
-        try:
-            index = choices.index(self.resolution.get())
-        except ValueError:
-            index = 2
-        self.send_control("quality", index)
+    def redraw_last_image(self, _event=None):
+        if self.last_image is None or not self.running:
+            return
+        width = max(self.preview.winfo_width(), 80)
+        height = max(self.preview.winfo_height(), 80)
+        image = self.last_image.copy()
+        image.thumbnail((width, height), Image.Resampling.LANCZOS)
+        self.frame_photo = ImageTk.PhotoImage(image)
+        self.preview.configure(image=self.frame_photo, text="")
+
+    def set_error(self, error):
+        if self.running:
+            self.status.set(f"Waiting for phone… {error}")
+            self.live_badge.configure(text="●  RETRYING", fg="#ffd479")
 
     def send_control(self, command, value=None):
         if not self.running:
@@ -134,44 +246,34 @@ class CamLinkDesktop:
                 self.root.after(0, self.control_status.set, result)
             except Exception as exc:
                 self.root.after(0, self.control_status.set, f"Control failed: {exc}")
-
         threading.Thread(target=worker, daemon=True).start()
 
-    def fetch_loop(self):
-        while self.running:
-            try:
-                url = f"http://{self.host}:8080/frame?t={time.time_ns()}"
-                req = Request(url, headers={"Cache-Control": "no-cache"})
-                with urlopen(req, timeout=3) as response:
-                    data = response.read()
-                image = Image.open(io.BytesIO(data)).convert("RGB")
-                self.root.after(0, self.show_frame, image)
-                time.sleep(0.06)
-            except Exception as exc:
-                self.root.after(0, self.set_status, f"Waiting for camera… ({exc})")
-                time.sleep(1)
+    def apply_zoom(self):
+        self.send_control("zoom", round(self.zoom_value.get(), 1))
 
-    def show_frame(self, image):
-        if not self.running:
-            return
-        width = max(self.screen.winfo_width(), 320)
-        height = max(self.screen.winfo_height(), 240)
-        image.thumbnail((width, height), Image.Resampling.LANCZOS)
-        self.frame_photo = ImageTk.PhotoImage(image)
-        self.screen.configure(image=self.frame_photo, text="")
-        self.status.set(f"Connected to {self.host}:8080")
+    def apply_resolution(self):
+        choices = ("480p · Low", "720p · HD", "1080p · Full HD", "1440p · 2K", "2160p · 4K")
+        try:
+            self.send_control("quality", choices.index(self.resolution.get()))
+        except ValueError:
+            self.send_control("quality", 2)
 
-    def set_status(self, text):
-        if self.running:
-            self.status.set(text)
+    def apply_jpeg(self):
+        self.send_control("jpeg", int(self.jpeg_value.get()))
 
-    def disconnect(self):
+    def disconnect(self, clear_status=True):
         self.running = False
-        self.connect_button.configure(state="normal")
-        self.stop_button.configure(state="disabled")
-        self.status.set("Disconnected")
-        self.screen.configure(image="", text="Camera preview will appear here")
-        self.frame_photo = None
+        if hasattr(self, "connect_button"):
+            self.connect_button.configure(state="normal")
+            self.stop_button.configure(state="disabled")
+        if hasattr(self, "preview"):
+            self.preview.configure(image="", text="Your camera feed will appear here\n\nConnect to your phone to start viewing")
+            self.frame_photo = None
+            self.last_image = None
+        if clear_status and hasattr(self, "status"):
+            self.status.set("Disconnected")
+            self.live_badge.configure(text="●  DISCONNECTED", fg=MUTED)
+            self.fps_label.configure(text="— FPS")
 
     def close(self):
         self.disconnect()
