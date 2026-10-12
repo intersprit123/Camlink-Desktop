@@ -268,7 +268,7 @@ class CamLinkDesktop:
                             line = response.readline()
                             if not line:
                                 raise ConnectionError("Stream ended")
-                            if line in (b"\\r\\n", b"\\n"):
+                            if line in (b"\r\n", b"\n"):
                                 break
                             if b":" in line:
                                 key, value = line.decode("latin-1").split(":", 1)
