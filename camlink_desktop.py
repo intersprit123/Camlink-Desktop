@@ -128,6 +128,9 @@ class CamLinkDesktop:
 
         tk.Label(root, text="CAMLINK  •  PRIVATE LOCAL NETWORK  •  USE ON A TRUSTED WI-FI NETWORK",
                  bg=BG, fg="#71819b", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=24, pady=(0, 12))
+        if not self.sidebar_visible:
+            self.sidebar.pack_forget()
+            self.toggle_button.configure(text="›")
         self.root.bind("<F11>", self.toggle_fullscreen)
         self.root.bind("<Escape>", self.exit_fullscreen)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
