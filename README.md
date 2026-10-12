@@ -17,9 +17,9 @@ GitHub Actions builds the Windows executable automatically when changes are push
 2. On the Android phone, open CamLink, choose **Share this phone's camera**, grant camera permission, and start sharing.
 3. Note the IP address shown by the phone.
 4. Open CamLink Desktop, enter that IP address, and click **Connect**.
-5. Use **Switch front / rear**, **Flashlight on / off**, and **Apply zoom** to control the phone camera where supported.
+5. Use **Switch front / rear**, **Flashlight on / off**, **Apply zoom**, **Apply resolution**, and **Apply quality** to control the phone camera where supported.
 
-The desktop viewer uses the CamLink HTTP JPEG frame endpoint and control endpoint on port 8080. This is an early prototype, not encrypted and without pairing authentication. Use only on a trusted local network; do not port-forward the camera server to the internet.
+The desktop viewer uses the CamLink HTTP JPEG frame endpoint and control endpoint on port 8080. Resolution choices (480p, 720p, 1080p, 2K, 4K) are requests; actual capture resolution depends on the phone and CameraX support. JPEG quality is adjustable from 50–95%. Higher settings may increase lag, heat, battery use, and Wi-Fi bandwidth. This is an early prototype, not encrypted and without pairing authentication. Use only on a trusted local network; do not port-forward the camera server to the internet.
 
 ## Build locally
 
