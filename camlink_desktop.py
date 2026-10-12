@@ -303,6 +303,7 @@ class CamLinkDesktop:
 
         jpeg = None
         sequence = 0
+        stats_updated = False
         with self.pending_jpeg_lock:
             if self.pending_sequence != self.displayed_sequence and self.pending_jpeg is not None:
                 jpeg = self.pending_jpeg
@@ -317,6 +318,7 @@ class CamLinkDesktop:
                 self.last_stats_time = now
                 self.received_fps = frames / elapsed
                 self.received_mbps = (byte_count * 8 / elapsed) / 1_000_000
+                stats_updated = True
 
         if jpeg is not None:
             self.displayed_sequence = sequence
@@ -330,13 +332,15 @@ class CamLinkDesktop:
                 self.status.set(f"Received an invalid frame: {exc}")
 
         if self.running:
-            self.fps_label.configure(
-                text=f"{self.received_fps:.0f} RX FPS · {self.decode_ms:.1f} ms decode"
-            )
-            if self.received_fps > 0:
-                self.status.set(
-                    f"Connected to {self.host}:8080  ·  {self.received_mbps:.1f} Mbps"
+            # Update text widgets once per second, not once per preview tick.
+            if stats_updated:
+                self.fps_label.configure(
+                    text=f"{self.received_fps:.0f} RX FPS · {self.decode_ms:.1f} ms decode"
                 )
+                if self.received_fps > 0:
+                    self.status.set(
+                        f"Connected to {self.host}:8080  ·  {self.received_mbps:.1f} Mbps"
+                    )
             try:
                 self.preview_tick_id = self.root.after(16, self.consume_latest_frame)
             except tk.TclError:
