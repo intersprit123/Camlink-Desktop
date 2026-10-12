@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from urllib.request import urlopen, Request
 from urllib.error import URLError
+from urllib.parse import urlencode
 
 try:
     from PIL import Image, ImageTk
@@ -22,6 +23,8 @@ class CamLinkDesktop:
         self.running = False
         self.worker = None
         self.frame_photo = None
+        self.control_status = tk.StringVar(value="Controls require a connected CamLink camera phone.")
+        self.zoom_value = tk.DoubleVar(value=1.0)
 
         style = ttk.Style()
         style.theme_use("clam")
@@ -46,6 +49,18 @@ class CamLinkDesktop:
         self.stop_button = ttk.Button(controls, text="Disconnect", command=self.disconnect, state="disabled")
         self.stop_button.pack(side="left", padx=8)
 
+        remote = ttk.LabelFrame(root, text="Remote camera controls", padding=12)
+        remote.pack(fill="x", padx=16, pady=(0, 10))
+        ttk.Button(remote, text="Switch front / rear", command=lambda: self.send_control("switch")).pack(side="left", padx=(0, 8))
+        ttk.Button(remote, text="Flashlight on / off", command=lambda: self.send_control("torch")).pack(side="left", padx=(0, 8))
+        ttk.Label(remote, text="Zoom").pack(side="left", padx=(8, 4))
+        self.zoom_scale = ttk.Scale(remote, from_=1.0, to=4.0, variable=self.zoom_value, command=self.on_zoom_change)
+        self.zoom_scale.pack(side="left", fill="x", expand=True, padx=6)
+        self.zoom_label = ttk.Label(remote, text="1.0×")
+        self.zoom_label.pack(side="left", padx=4)
+        ttk.Button(remote, text="Apply zoom", command=lambda: self.send_control("zoom", self.zoom_value.get())).pack(side="left", padx=(8, 0))
+        ttk.Label(root, textvariable=self.control_status).pack(anchor="w", padx=18, pady=(0, 8))
+
         self.status = tk.StringVar(value="Not connected")
         ttk.Label(root, textvariable=self.status).pack(anchor="w", padx=18, pady=(0, 8))
 
@@ -65,6 +80,29 @@ class CamLinkDesktop:
         self.status.set(f"Connecting to {host}:8080…")
         self.worker = threading.Thread(target=self.fetch_loop, daemon=True)
         self.worker.start()
+
+    def on_zoom_change(self, value):
+        self.zoom_label.configure(text=f"{float(value):.1f}×")
+
+    def send_control(self, command, value=None):
+        if not self.running:
+            self.control_status.set("Connect to the camera phone first.")
+            return
+        params = {"cmd": command}
+        if value is not None:
+            params["value"] = str(value)
+        url = f"http://{self.host}:8080/control?{urlencode(params)}"
+
+        def worker():
+            try:
+                req = Request(url, headers={"Cache-Control": "no-cache"})
+                with urlopen(req, timeout=4) as response:
+                    result = response.read().decode("utf-8", errors="replace")
+                self.root.after(0, self.control_status.set, result)
+            except Exception as exc:
+                self.root.after(0, self.control_status.set, f"Control failed: {exc}")
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def fetch_loop(self):
         while self.running:
