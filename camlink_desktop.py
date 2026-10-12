@@ -34,6 +34,9 @@ class CamLinkDesktop:
         self.worker = None
         self.frame_photo = None
         self.last_image = None
+        self.frame_queue_lock = threading.Lock()
+        self.pending_frame = None
+        self.frame_update_scheduled = False
         self.sidebar_visible = True
         self.frame_count = 0
         self.last_fps_time = time.monotonic()
@@ -221,11 +224,27 @@ class CamLinkDesktop:
                         response.read(2)
                         with Image.open(io.BytesIO(jpeg)) as source:
                             image = source.convert('RGB')
-                        self.root.after(0, self.show_frame, image)
+                        # Keep only the newest decoded frame; never flood Tk's event queue.
+                        schedule_update = False
+                        with self.frame_queue_lock:
+                            self.pending_frame = image
+                            if not self.frame_update_scheduled:
+                                self.frame_update_scheduled = True
+                                schedule_update = True
+                        if schedule_update:
+                            self.root.after(0, self.process_pending_frame)
             except Exception as exc:
                 if self.running:
                     self.root.after(0, self.set_error, str(exc))
                     time.sleep(0.01)
+
+    def process_pending_frame(self):
+        with self.frame_queue_lock:
+            image = self.pending_frame
+            self.pending_frame = None
+            self.frame_update_scheduled = False
+        if image is not None and self.running:
+            self.show_frame(image)
 
     def show_frame(self, image):
         if not self.running:
