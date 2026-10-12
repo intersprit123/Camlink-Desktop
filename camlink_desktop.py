@@ -146,7 +146,7 @@ class CamLinkDesktop:
                     data = response.read()
                 image = Image.open(io.BytesIO(data)).convert("RGB")
                 self.root.after(0, self.show_frame, image)
-                time.sleep(0.12)
+                time.sleep(0.06)
             except Exception as exc:
                 self.root.after(0, self.set_status, f"Waiting for camera… ({exc})")
                 time.sleep(1)
