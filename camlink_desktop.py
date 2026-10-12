@@ -41,6 +41,8 @@ class CamLinkDesktop:
         self.control_status = tk.StringVar(value="Connect to a camera to unlock controls.")
         self.status = tk.StringVar(value="Ready to connect")
         self.zoom_value = tk.DoubleVar(value=1.0)
+        self.exposure_value = tk.DoubleVar(value=0.0)
+        self.white_balance = tk.StringVar(value="auto")
         self.jpeg_value = tk.IntVar(value=85)
         self.resolution = tk.StringVar(value="1080p · Full HD")
 
@@ -128,10 +130,20 @@ class CamLinkDesktop:
         self.section(self.sidebar, "Camera")
         row = tk.Frame(self.sidebar, bg=PANEL)
         row.pack(fill="x", padx=16)
-        ttk.Button(row, text="↻  Flip camera", command=lambda: self.send_control("switch")).pack(fill="x", expand=True, side="left")
-        ttk.Button(row, text="☼  Flash", command=lambda: self.send_control("torch")).pack(fill="x", expand=True, side="left", padx=(7, 0))
+        ttk.Button(row, text="↻  Flip", command=lambda: self.send_control("switch")).pack(fill="x", expand=True, side="left")
+        ttk.Button(row, text="☼  Flash", command=lambda: self.send_control("torch")).pack(fill="x", expand=True, side="left", padx=(6, 0))
+        ttk.Button(row, text="◎  Focus", command=lambda: self.send_control("focus")).pack(fill="x", expand=True, side="left", padx=(6, 0))
 
-        self.make_slider("Zoom", self.zoom_value, 1, 4, lambda v: f"{float(v):.1f}×", self.apply_zoom)
+        self.make_slider("Zoom", self.zoom_value, 1, 10, lambda v: f"{float(v):.1f}×", self.apply_zoom)
+        self.make_slider("Exposure compensation", self.exposure_value, -3, 3,
+                         lambda v: f"{int(round(float(v))):+d} steps", self.apply_exposure, integer=True)
+        tk.Label(self.sidebar, text="White balance", bg=PANEL, fg=TEXT, font=("Segoe UI", 10)).pack(anchor="w", padx=16, pady=(10, 4))
+        wb_row = tk.Frame(self.sidebar, bg=PANEL)
+        wb_row.pack(fill="x", padx=16, pady=(0, 8))
+        self.white_balance_box = ttk.Combobox(wb_row, textvariable=self.white_balance, state="readonly",
+                                               values=("auto", "daylight", "cloudy", "incandescent", "fluorescent"))
+        self.white_balance_box.pack(side="left", fill="x", expand=True)
+        ttk.Button(wb_row, text="Apply", command=self.apply_white_balance).pack(side="left", padx=(6, 0))
         self.section(self.sidebar, "Image quality")
         tk.Label(self.sidebar, text="Capture resolution", bg=PANEL, fg=TEXT, font=("Segoe UI", 10)).pack(anchor="w", padx=16)
         self.resolution_box = ttk.Combobox(self.sidebar, textvariable=self.resolution, state="readonly",
@@ -279,6 +291,12 @@ class CamLinkDesktop:
 
     def apply_zoom(self):
         self.send_control("zoom", round(self.zoom_value.get(), 1))
+
+    def apply_exposure(self):
+        self.send_control("exposure", int(round(self.exposure_value.get())))
+
+    def apply_white_balance(self):
+        self.send_control("whitebalance", self.white_balance.get())
 
     def apply_resolution(self):
         choices = ("480p · Low", "720p · HD", "1080p · Full HD", "1440p · 2K", "2160p · 4K")
