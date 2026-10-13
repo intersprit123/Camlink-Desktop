@@ -36,6 +36,7 @@ class CamLinkDesktop:
         self.root.minsize(900, 600)
         self.root.configure(bg=BG)
         self.running = False
+        self.connection_generation = 0  # Invalidates older pollers after a rapid Stop/Connect.
         self.host = ""
         self.worker = None
         self.frame_photo = None
@@ -227,6 +228,8 @@ class CamLinkDesktop:
             messagebox.showerror("CamLink", "Enter the camera phone's IP address, for example 192.168.1.12.")
             return
         self.disconnect(clear_status=False)
+        self.connection_generation += 1
+        generation = self.connection_generation
         self.host = host
         self.save_settings()
         self.running = True
@@ -234,19 +237,21 @@ class CamLinkDesktop:
         self.stop_button.configure(state="normal")
         self.status.set(f"Connecting to {host}:8080…")
         self.live_badge.configure(text="●  CONNECTING", fg="#ffd479")
-        self.worker = threading.Thread(target=self.fetch_loop, daemon=True)
+        self.worker = threading.Thread(target=self.fetch_loop, args=(generation,), daemon=True)
         self.worker.start()
 
-    def fetch_loop(self):
-        # Compatibility mode: request one JPEG at a time from the Android /frame endpoint.
-        # This restores the connection path used before the continuous /stream migration.
+    def fetch_loop(self, generation):
+        # Each connection gets a generation token so an older worker cannot resume
+        # polling if the user quickly presses Stop and then Connect again.
         retry_delay = 0.10
-        while self.running:
+        while self.running and generation == self.connection_generation:
             try:
                 url = f"http://{self.host}:8080/frame?t={time.time_ns()}"
                 req = Request(url, headers={"Cache-Control": "no-cache", "Pragma": "no-cache"})
                 with urlopen(req, timeout=3) as response:
                     jpeg = response.read()
+                if not self.running or generation != self.connection_generation:
+                    return
                 if not jpeg:
                     raise ConnectionError("The phone returned an empty frame")
 
@@ -259,7 +264,7 @@ class CamLinkDesktop:
                     self.received_bytes += len(jpeg)
                 retry_delay = 0.10
             except Exception as exc:
-                if self.running:
+                if self.running and generation == self.connection_generation:
                     try:
                         self.root.after(0, self.set_error, str(exc))
                     except tk.TclError:
@@ -268,7 +273,7 @@ class CamLinkDesktop:
                     retry_delay = min(0.75, retry_delay * 1.7)
 
             # Avoid hammering the phone's HTTP server while polling individual frames.
-            if self.running:
+            if self.running and generation == self.connection_generation:
                 time.sleep(0.01)
 
     def consume_latest_frame(self):
@@ -418,6 +423,7 @@ class CamLinkDesktop:
 
     def disconnect(self, clear_status=True):
         self.running = False
+        self.connection_generation += 1
         with self.pending_jpeg_lock:
             self.pending_jpeg = None
             self.pending_sequence += 1
