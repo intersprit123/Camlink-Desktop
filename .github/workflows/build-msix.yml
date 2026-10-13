@@ -8,6 +8,7 @@ on:
       - "scripts/package_msix.py"
       - "requirements.txt"
       - "camlink_desktop.py"
+      - "scripts/verify_connection_contract.py"
   workflow_dispatch:
     inputs:
       identity_name:
@@ -45,6 +46,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Verify Windows connection contract
+        run: python scripts/verify_connection_contract.py
+        shell: pwsh
 
       - name: Install dependencies
         run: |
