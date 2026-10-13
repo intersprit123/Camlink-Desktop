@@ -11,6 +11,15 @@ Modern Windows desktop viewer for the CamLink Android camera-sharing app, with a
 
 GitHub Actions builds the Windows executable automatically when changes are pushed to `main`. You can also run the workflow manually from Actions.
 
+## Build an MSIX for Microsoft Store
+
+1. In Partner Center, open **Product management → Product identity** and copy the exact **Package/Identity name**, **Publisher**, and **Publisher display name**.
+2. Open this repository's **Actions** tab and select **Build CamLink Desktop MSIX**.
+3. Click **Run workflow** and enter those exact identity values plus a four-part package version (for a first submission, use the version you intend to publish, such as `1.0.0.0`).
+4. When the workflow succeeds, download the `CamLink-Desktop-MSIX` artifact and extract the ZIP. Upload the resulting `.msix` to the app's **Packages** page in Partner Center.
+
+The workflow builds the EXE and packages it as an unsigned MSIX. For Microsoft Store submission, Microsoft signs the MSIX after certification; a third-party code-signing certificate is not needed. The package identity and publisher must exactly match Partner Center, and the version must be increased for later Store updates. A successful package build does not itself mean the Store has certified the app.
+
 ## How to use
 
 1. Connect the camera phone and Windows PC to the same trusted Wi-Fi network.
