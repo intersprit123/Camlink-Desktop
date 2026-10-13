@@ -6,14 +6,17 @@ on:
       identity_name:
         description: "Exact Package/Identity name from Partner Center → Product identity"
         required: true
+        default: "interspirit.Camlink-Desktop"
         type: string
       publisher:
         description: "Exact Publisher value from Partner Center → Product identity (including CN= if shown)"
         required: true
+        default: "CN=2CDE3251-E7BC-48D5-85A7-AA23678D1242"
         type: string
       publisher_display_name:
         description: "Publisher display name from Partner Center"
         required: true
+        default: "interspirit"
         type: string
       package_version:
         description: "Four-part package version; increment for each Store update"
