@@ -21,10 +21,12 @@ from PIL import Image, ImageDraw
 FOUNDATION = "http://schemas.microsoft.com/appx/manifest/foundation/windows10"
 UAP = "http://schemas.microsoft.com/appx/manifest/uap/windows10"
 DESKTOP = "http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+RESCAP = "http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
 
 ET.register_namespace("", FOUNDATION)
 ET.register_namespace("uap", UAP)
 ET.register_namespace("desktop", DESKTOP)
+ET.register_namespace("rescap", RESCAP)
 
 
 def valid_version(value: str) -> str:
@@ -75,7 +77,7 @@ def make_manifest(stage: Path, identity_name: str, publisher: str,
                   publisher_display_name: str, version: str) -> None:
     package = ET.Element(
         f"{{{FOUNDATION}}}Package",
-        {"IgnorableNamespaces": "uap desktop"},
+        {"IgnorableNamespaces": "uap desktop rescap"},
     )
     ET.SubElement(
         package, f"{{{FOUNDATION}}}Identity",
@@ -102,6 +104,9 @@ def make_manifest(stage: Path, identity_name: str, publisher: str,
     )
     resources = ET.SubElement(package, f"{{{FOUNDATION}}}Resources")
     ET.SubElement(resources, f"{{{FOUNDATION}}}Resource", {"Language": "en-us"})
+
+    capabilities = ET.SubElement(package, f"{{{FOUNDATION}}}Capabilities")
+    ET.SubElement(capabilities, f"{{{RESCAP}}}Capability", {"Name": "runFullTrust"})
 
     applications = ET.SubElement(package, f"{{{FOUNDATION}}}Applications")
     application = ET.SubElement(
