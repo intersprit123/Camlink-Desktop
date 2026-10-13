@@ -28,7 +28,7 @@ on:
       package_version:
         description: "Four-part package version; increment for each Store update"
         required: true
-        default: "1.0.0.1"
+        default: "1.0.1.0"
         type: string
 
 permissions:
@@ -64,7 +64,7 @@ jobs:
           --identity-name "${{ inputs.identity_name || 'interspirit.Camlink-Desktop' }}"
           --publisher "${{ inputs.publisher || 'CN=2CDE3251-E7BC-48D5-85A7-AA23678D1242' }}"
           --publisher-display-name "${{ inputs.publisher_display_name || 'interspirit' }}"
-          --version "${{ inputs.package_version || '1.0.0.1' }}"
+          --version "${{ inputs.package_version || '1.0.1.0' }}"
         shell: pwsh
 
       - name: Upload Microsoft Store package
