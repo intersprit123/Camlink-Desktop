@@ -237,57 +237,27 @@ class CamLinkDesktop:
         self.worker = threading.Thread(target=self.fetch_loop, daemon=True)
         self.worker.start()
 
-    @staticmethod
-    def read_exact(stream, size):
-        data = bytearray()
-        while len(data) < size:
-            part = stream.read(size - len(data))
-            if not part:
-                raise ConnectionError('Stream ended')
-            data.extend(part)
-        return bytes(data)
-
     def fetch_loop(self):
+        # Compatibility mode: request one JPEG at a time from the Android /frame endpoint.
+        # This restores the connection path used before the continuous /stream migration.
         retry_delay = 0.10
         while self.running:
             try:
-                req = Request(
-                    f"http://{self.host}:8080/stream",
-                    headers={"Accept": "multipart/x-mixed-replace", "Cache-Control": "no-cache"}
-                )
-                with urlopen(req, timeout=10) as response:
-                    retry_delay = 0.10
-                    while self.running:
-                        boundary = response.readline()
-                        if not boundary:
-                            raise ConnectionError("Stream ended")
-                        if not boundary.startswith(b"--frame"):
-                            continue
+                url = f"http://{self.host}:8080/frame?t={time.time_ns()}"
+                req = Request(url, headers={"Cache-Control": "no-cache", "Pragma": "no-cache"})
+                with urlopen(req, timeout=3) as response:
+                    jpeg = response.read()
+                if not jpeg:
+                    raise ConnectionError("The phone returned an empty frame")
 
-                        headers = {}
-                        while True:
-                            line = response.readline()
-                            if not line:
-                                raise ConnectionError("Stream ended")
-                            if line in (b"\r\n", b"\n"):
-                                break
-                            if b":" in line:
-                                key, value = line.decode("latin-1").split(":", 1)
-                                headers[key.strip().lower()] = value.strip()
-
-                        size = int(headers.get("content-length", "0"))
-                        if size <= 0 or size > 50_000_000:
-                            raise ConnectionError("Invalid JPEG size")
-                        jpeg = self.read_exact(response, size)
-                        self.read_exact(response, 2)  # multipart CRLF separator
-
-                        # Keep only the newest compressed frame. Do not decode every frame
-                        # or enqueue Tk callbacks; slow displays must never build frame lag.
-                        with self.pending_jpeg_lock:
-                            self.pending_jpeg = jpeg
-                            self.pending_sequence += 1
-                            self.received_frames += 1
-                            self.received_bytes += len(jpeg)
+                # Keep only the newest compressed frame, using the existing low-latency
+                # UI consumer so queued frames cannot build up.
+                with self.pending_jpeg_lock:
+                    self.pending_jpeg = jpeg
+                    self.pending_sequence += 1
+                    self.received_frames += 1
+                    self.received_bytes += len(jpeg)
+                retry_delay = 0.10
             except Exception as exc:
                 if self.running:
                     try:
@@ -296,6 +266,10 @@ class CamLinkDesktop:
                         return
                     time.sleep(retry_delay)
                     retry_delay = min(0.75, retry_delay * 1.7)
+
+            # Avoid hammering the phone's HTTP server while polling individual frames.
+            if self.running:
+                time.sleep(0.01)
 
     def consume_latest_frame(self):
         if not self.root.winfo_exists():
