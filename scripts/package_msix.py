@@ -35,6 +35,10 @@ def valid_version(value: str) -> str:
     parts = [int(part) for part in value.split(".")]
     if any(part > 65535 for part in parts):
         raise argparse.ArgumentTypeError("Each version part must be between 0 and 65535")
+    if parts[3] != 0:
+        raise argparse.ArgumentTypeError(
+            "Microsoft Store package versions must have revision 0 (for example, 1.0.1.0)"
+        )
     return ".".join(map(str, parts))
 
 
