@@ -320,10 +320,13 @@ class CamLinkDesktop:
                     self.status.set(
                         f"Connected to {self.host}:8080  ·  {self.received_mbps:.1f} Mbps"
                     )
-            try:
-                self.preview_tick_id = self.root.after(16, self.consume_latest_frame)
-            except tk.TclError:
-                self.preview_tick_id = None
+
+        # Keep the consumer alive while disconnected; Connect may be pressed long
+        # after startup, and the frame renderer must still be waiting for new frames.
+        try:
+            self.preview_tick_id = self.root.after(16, self.consume_latest_frame)
+        except tk.TclError:
+            self.preview_tick_id = None
 
 
     def show_frame(self, image):
