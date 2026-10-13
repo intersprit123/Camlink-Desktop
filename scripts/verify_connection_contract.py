@@ -59,7 +59,7 @@ check("poller backs off on request errors and has a finite request timeout",
       "urlopen(req, timeout=3)" in SOURCE and "retry_delay = min(0.75, retry_delay * 1.7)" in SOURCE)
 consumer = SOURCE.split("    def consume_latest_frame(self):", 1)[1].split("    def show_frame(self, image):", 1)[0]
 check("preview timer keeps rearming while disconnected, so Connect can display later frames",
-      "\\n        try:\\n            self.preview_tick_id = self.root.after(16, self.consume_latest_frame)" in consumer)
+      "\n        try:\n            self.preview_tick_id = self.root.after(16, self.consume_latest_frame)" in consumer)
 check("desktop does not call the /stream endpoint", "/stream" not in SOURCE)
 
 # Desktop control requests must match Android service command names.
