@@ -63,7 +63,10 @@ class CamLinkDesktop:
         self.running = False
         self.connection_generation = 0  # Invalidates older pollers after a rapid Stop/Connect.
         self.host = ""
-        # This app talks only to the camera on the local network. Ignore system/\n        # environment proxies so private LAN addresses are never sent to a proxy.\n        self.http_opener = build_opener(ProxyHandler({}))\n        self.worker = None
+        # This app talks only to the camera on the local network. Ignore system/
+        # environment proxies so private LAN addresses are never sent to a proxy.
+        self.http_opener = build_opener(ProxyHandler({}))
+        self.worker = None
         self.frame_photo = None
         self.last_image = None
         self.preview_mode = self.settings.get("preview_mode", "fit")
@@ -446,7 +449,7 @@ class CamLinkDesktop:
                         f"http://{self.host}:8080/control?{params}",
                         headers={"Cache-Control": "no-cache"}
                     )
-                    with urlopen(req, timeout=4) as response:
+                    with self.http_opener.open(req, timeout=4) as response:
                         results.append(response.read().decode("utf-8", errors="replace"))
                 message = "Performance preset applied · 720p / JPEG 75%"
             except Exception as exc:
