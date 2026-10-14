@@ -1,3 +1,4 @@
+import http.client
 import io
 import json
 import threading
@@ -6,7 +7,6 @@ import tkinter as tk
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
-from urllib.request import build_opener, ProxyHandler, Request
 from urllib.parse import urlencode, urlsplit
 
 try:
@@ -63,9 +63,6 @@ class CamLinkDesktop:
         self.running = False
         self.connection_generation = 0  # Invalidates older pollers after a rapid Stop/Connect.
         self.host = ""
-        # This app talks only to the camera on the local network. Ignore system/
-        # environment proxies so private LAN addresses are never sent to a proxy.
-        self.http_opener = build_opener(ProxyHandler({}))
         self.worker = None
         self.frame_photo = None
         self.last_image = None
@@ -273,17 +270,35 @@ class CamLinkDesktop:
         self.worker = threading.Thread(target=self.fetch_loop, args=(generation,), daemon=True)
         self.worker.start()
 
+    def http_get(self, path, timeout):
+        """Use a plain local HTTP GET, matching CamLink's simple frame-polling protocol."""
+        host = self.host.strip("[]")
+        connection = http.client.HTTPConnection(host, 8080, timeout=timeout)
+        try:
+            connection.request(
+                "GET",
+                path,
+                headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+            )
+            response = connection.getresponse()
+            body = response.read()
+            return response.status, response.headers.get("Content-Type", "").lower(), body
+        finally:
+            connection.close()
+
     def fetch_loop(self, generation):
+        # Poll the same /frame endpoint used by CamLink's Android viewer.
         # Each connection gets a generation token so an older worker cannot resume
         # polling if the user quickly presses Stop and then Connect again.
         retry_delay = 0.10
         while self.running and generation == self.connection_generation:
             try:
-                url = f"http://{self.host}:8080/frame?t={time.time_ns()}"
-                req = Request(url, headers={"Cache-Control": "no-cache", "Pragma": "no-cache"})
-                with self.http_opener.open(req, timeout=3) as response:
-                    jpeg = response.read()
-                    content_type = response.headers.get("Content-Type", "").lower()
+                status, content_type, jpeg = self.http_get(
+                    f"/frame?t={time.time_ns()}", timeout=3
+                )
+                if status != 200:
+                    detail = "Camera is still starting" if b"Camera is starting" in jpeg else f"HTTP {status}"
+                    raise ConnectionError(f"Camera frame unavailable: {detail}")
                 if not self.running or generation != self.connection_generation:
                     return
                 if not jpeg:
@@ -398,13 +413,14 @@ class CamLinkDesktop:
         params = {"cmd": command}
         if value is not None:
             params["value"] = str(value)
-        url = f"http://{self.host}:8080/control?{urlencode(params)}"
+        path = f"/control?{urlencode(params)}"
 
         def worker():
             try:
-                req = Request(url, headers={"Cache-Control": "no-cache"})
-                with self.http_opener.open(req, timeout=4) as response:
-                    result = response.read().decode("utf-8", errors="replace")
+                status, _content_type, body = self.http_get(path, timeout=4)
+                result = body.decode("utf-8", errors="replace")
+                if status != 200:
+                    result = f"HTTP {status}: {result}"
                 self.root.after(0, self.control_status.set, result)
             except Exception as exc:
                 self.root.after(0, self.control_status.set, f"Control failed: {exc}")
@@ -445,12 +461,13 @@ class CamLinkDesktop:
             try:
                 for command, value in (("quality", "1"), ("jpeg", "75")):
                     params = urlencode({"cmd": command, "value": value})
-                    req = Request(
-                        f"http://{self.host}:8080/control?{params}",
-                        headers={"Cache-Control": "no-cache"}
+                    status, _content_type, body = self.http_get(
+                        f"/control?{params}", timeout=4
                     )
-                    with self.http_opener.open(req, timeout=4) as response:
-                        results.append(response.read().decode("utf-8", errors="replace"))
+                    result = body.decode("utf-8", errors="replace")
+                    if status != 200:
+                        raise ConnectionError(f"HTTP {status}: {result}")
+                    results.append(result)
                 message = "Performance preset applied · 720p / JPEG 75%"
             except Exception as exc:
                 message = f"Could not apply full performance preset: {exc}"
