@@ -1,13 +1,10 @@
-import http.client
 import io
-import json
 import threading
 import time
 import tkinter as tk
-from datetime import datetime
-from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
-from urllib.parse import urlencode, urlsplit
+from tkinter import messagebox, ttk
+from urllib.request import urlopen, Request
+from urllib.parse import urlencode
 
 try:
     from PIL import Image, ImageTk
@@ -15,85 +12,37 @@ except ImportError:
     raise SystemExit("Pillow is required. Install it with: python -m pip install -r requirements.txt")
 
 
-BG = "#0a0f1a"
-PANEL = "#111927"
-PANEL_ALT = "#192438"
-BORDER = "#28364c"
-TEXT = "#f4f7fb"
-MUTED = "#9aa9bd"
-ACCENT = "#4f7cff"
-GREEN = "#42d6ad"
-
-
-def normalize_camera_address(value):
-    """Accept a bare camera IP/host or a copied HTTP URL for the camera server."""
-    raw = value.strip()
-    if not raw:
-        raise ValueError("Enter the camera phone's IP address or HTTP URL.")
-
-    candidate = raw if "://" in raw else f"http://{raw}"
-    try:
-        parsed = urlsplit(candidate)
-        port = parsed.port  # Accessing .port also validates malformed port numbers.
-    except ValueError as exc:
-        raise ValueError("That camera address is not valid.") from exc
-
-    if parsed.scheme.lower() != "http":
-        raise ValueError("CamLink uses HTTP on the local Wi-Fi network, not HTTPS.")
-    if not parsed.hostname or parsed.username is not None or parsed.password is not None:
-        raise ValueError("Enter the camera phone's IP address or HTTP URL.")
-    if port not in (None, 8080):
-        raise ValueError("CamLink's camera server uses port 8080.")
-
-    hostname = parsed.hostname
-    # Keep IPv6 literals valid when rebuilding the request URL.
-    return f"[{hostname}]" if ":" in hostname else hostname
+BG = "#0b1020"
+PANEL = "#121a2d"
+PANEL_ALT = "#18233a"
+BORDER = "#263451"
+TEXT = "#f3f6ff"
+MUTED = "#98a7c4"
+ACCENT = "#6d8cff"
+GREEN = "#55dfb4"
 
 
 class CamLinkDesktop:
     def __init__(self, root):
         self.root = root
         self.root.title("CamLink | Desktop Camera")
-        self.settings_path = Path.home() / ".camlink_desktop.json"
-        self.settings = self.load_settings()
-        self.windowed_geometry = self.settings.get("geometry", "1360x860")
-        self.root.geometry(self.windowed_geometry)
-        self.root.minsize(900, 600)
+        self.root.geometry("1240x800")
+        self.root.minsize(760, 520)
         self.root.configure(bg=BG)
         self.running = False
-        self.connection_generation = 0  # Invalidates older pollers after a rapid Stop/Connect.
         self.host = ""
         self.worker = None
         self.frame_photo = None
         self.last_image = None
-        self.preview_mode = self.settings.get("preview_mode", "fit")
-        if self.preview_mode not in ("fit", "original"):
-            self.preview_mode = "fit"
-        self.fullscreen = False
-        self.sidebar_visible = bool(self.settings.get("sidebar_visible", True))
-        self.pending_jpeg_lock = threading.Lock()
-        self.pending_jpeg = None
-        self.pending_sequence = 0
-        self.displayed_sequence = 0
-        self.received_frames = 0
-        self.received_bytes = 0
-        self.received_fps = 0.0
-        self.received_mbps = 0.0
-        self.decode_ms = 0.0
-        self.last_stats_time = time.monotonic()
-        self.retry_delay = 0.10
-        self.preview_tick_id = None
+        self.sidebar_visible = True
+        self.frame_count = 0
+        self.last_fps_time = time.monotonic()
+        self.fps = 0
         self.control_status = tk.StringVar(value="Connect to a camera to unlock controls.")
         self.status = tk.StringVar(value="Ready to connect")
-        self.zoom_value = tk.DoubleVar(value=self.safe_number("zoom", 1.0, 1.0, 10.0))
-        self.exposure_value = tk.DoubleVar(value=self.safe_number("exposure", 0.0, -3.0, 3.0))
-        self.white_balance = tk.StringVar(value=self.settings.get("white_balance", "auto"))
-        if self.white_balance.get() not in ("auto", "daylight", "cloudy", "incandescent", "fluorescent"):
-            self.white_balance.set("auto")
-        self.jpeg_value = tk.IntVar(value=int(self.safe_number("jpeg_quality", 75, 50, 95)))
-        self.resolution = tk.StringVar(value=self.settings.get("resolution", "720p · HD"))
-        if self.resolution.get() not in ("480p · Low", "720p · HD", "1080p · Full HD", "1440p · 2K", "2160p · 4K"):
-            self.resolution.set("1080p · Full HD")
+        self.zoom_value = tk.DoubleVar(value=1.0)
+        self.jpeg_value = tk.IntVar(value=85)
+        self.resolution = tk.StringVar(value="1080p · Full HD")
 
         style = ttk.Style()
         style.theme_use("clam")
@@ -117,21 +66,21 @@ class CamLinkDesktop:
         header.pack(fill="x", padx=22, pady=(18, 14))
         brand = tk.Frame(header, bg=BG)
         brand.pack(side="left", fill="x", expand=True)
-        tk.Label(brand, text="CamLink", bg=BG, fg=TEXT, font=("Segoe UI", 24, "bold")).pack(anchor="w")
-        tk.Label(brand, text="LIVE CAMERA  /  DESKTOP STUDIO", bg=BG, fg=MUTED, font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(1, 0))
-        self.live_badge = tk.Label(header, text="●  DISCONNECTED", bg=PANEL_ALT, fg=MUTED, font=("Segoe UI", 9, "bold"), padx=14, pady=9)
+        tk.Label(brand, text="CamLink", bg=BG, fg=TEXT, font=("Segoe UI", 22, "bold")).pack(anchor="w")
+        tk.Label(brand, text="DESKTOP CAMERA STUDIO", bg=BG, fg=MUTED, font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(1, 0))
+        self.live_badge = tk.Label(header, text="●  DISCONNECTED", bg=PANEL_ALT, fg=MUTED, font=("Segoe UI", 9, "bold"), padx=12, pady=8)
         self.live_badge.pack(side="right")
 
         body = tk.Frame(root, bg=BG)
         body.pack(fill="both", expand=True, padx=22, pady=(0, 12))
         self.body = body
-        self.sidebar = tk.Frame(body, bg=PANEL, width=320, highlightbackground=BORDER, highlightthickness=1)
-        self.sidebar.pack(side="right", fill="y")
+        self.sidebar = tk.Frame(body, bg=PANEL, width=300, highlightbackground=BORDER, highlightthickness=1)
+        self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
         self.build_sidebar()
 
         self.divider = tk.Frame(body, bg=BG, width=34)
-        self.divider.pack(side="right", fill="y")
+        self.divider.pack(side="left", fill="y")
         self.toggle_button = tk.Button(self.divider, text="‹", command=self.toggle_sidebar, bg=PANEL_ALT, fg=TEXT,
                                        activebackground=ACCENT, activeforeground="#ffffff", relief="flat",
                                        bd=0, font=("Segoe UI", 17, "bold"), cursor="hand2", width=2)
@@ -140,40 +89,23 @@ class CamLinkDesktop:
         viewer = tk.Frame(body, bg=BG)
         viewer.pack(side="left", fill="both", expand=True)
         self.viewer = viewer
-        self.preview_border = tk.Frame(viewer, bg=BORDER, padx=2, pady=2)
+        self.preview_border = tk.Frame(viewer, bg=BORDER, padx=1, pady=1)
         self.preview_border.pack(fill="both", expand=True)
-        self.preview = tk.Label(self.preview_border, bg="#050912", fg=MUTED,
+        self.preview = tk.Label(self.preview_border, bg="#03060d", fg=MUTED,
                                 text="Your camera feed will appear here\n\nConnect to your phone to start viewing",
                                 font=("Segoe UI", 14), justify="center")
         self.preview.pack(fill="both", expand=True)
-        studio_tools = tk.Frame(viewer, bg=BG)
-        studio_tools.pack(fill="x", pady=(10, 0))
-        ttk.Button(studio_tools, text="Save snapshot", command=self.save_snapshot).pack(side="left")
-        ttk.Button(studio_tools, text="Fit to window", command=lambda: self.set_preview_mode("fit")).pack(side="left", padx=(7, 0))
-        ttk.Button(studio_tools, text="Original size", command=lambda: self.set_preview_mode("original")).pack(side="left", padx=(7, 0))
-        ttk.Button(studio_tools, text="⚡ Max FPS preset", command=self.apply_performance_profile).pack(side="left", padx=(7, 0))
-        self.fullscreen_button = ttk.Button(studio_tools, text="Fullscreen  (F11)", command=self.toggle_fullscreen)
-        self.fullscreen_button.pack(side="right")
-
         info = tk.Frame(viewer, bg=BG)
-        info.pack(fill="x", pady=(10, 0))
+        info.pack(fill="x", pady=(12, 0))
         self.status_label = tk.Label(info, textvariable=self.status, bg=BG, fg=MUTED, font=("Segoe UI", 10))
         self.status_label.pack(side="left")
         self.fps_label = tk.Label(info, text="— FPS", bg=BG, fg=GREEN, font=("Segoe UI", 10, "bold"))
         self.fps_label.pack(side="right")
 
-        tk.Label(root, text="CAMLINK  •  PRIVATE LOCAL NETWORK  •  USE ON A TRUSTED WI-FI NETWORK",
-                 bg=BG, fg="#71819b", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=24, pady=(0, 12))
-        if not self.sidebar_visible:
-            self.sidebar.pack_forget()
-            self.toggle_button.configure(text="›")
-        self.root.bind("<F11>", self.toggle_fullscreen)
-        self.root.bind("<Escape>", self.exit_fullscreen)
-        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        tk.Label(root, text="Private local-network viewer · Use only on a trusted Wi-Fi network",
+                 bg=BG, fg="#657493", font=("Segoe UI", 9)).pack(anchor="w", padx=24, pady=(0, 12))
+        root.protocol("WM_DELETE_WINDOW", self.close)
         self.preview.bind("<Configure>", self.redraw_last_image)
-        self.ip.set(str(self.settings.get("host", "")))
-        self.save_settings()
-        self.preview_tick_id = self.root.after(16, self.consume_latest_frame)
 
     def section(self, parent, title):
         tk.Label(parent, text=title.upper(), bg=PANEL, fg=MUTED,
@@ -181,9 +113,9 @@ class CamLinkDesktop:
 
     def build_sidebar(self):
         self.section(self.sidebar, "Connection")
-        tk.Label(self.sidebar, text="CAMERA PHONE ADDRESS", bg=PANEL, fg=MUTED,
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=16)
-        self.ip = tk.StringVar(value=str(self.settings.get("host", "")))
+        tk.Label(self.sidebar, text="Camera phone IP address", bg=PANEL, fg=TEXT,
+                 font=("Segoe UI", 10)).pack(anchor="w", padx=16)
+        self.ip = tk.StringVar(value="")
         self.ip_entry = ttk.Entry(self.sidebar, textvariable=self.ip)
         self.ip_entry.pack(fill="x", padx=16, pady=(6, 10))
         buttons = tk.Frame(self.sidebar, bg=PANEL)
@@ -196,20 +128,11 @@ class CamLinkDesktop:
         self.section(self.sidebar, "Camera")
         row = tk.Frame(self.sidebar, bg=PANEL)
         row.pack(fill="x", padx=16)
-        ttk.Button(row, text="↻  Flip", command=lambda: self.send_control("switch")).pack(fill="x", expand=True, side="left")
-        ttk.Button(row, text="☼  Flash", command=lambda: self.send_control("torch")).pack(fill="x", expand=True, side="left", padx=(6, 0))
-        ttk.Button(row, text="◎  Focus", command=lambda: self.send_control("focus")).pack(fill="x", expand=True, side="left", padx=(6, 0))
+        ttk.Button(row, text="↻  Flip camera", command=lambda: self.send_control("switch")).pack(fill="x", expand=True, side="left")
+        ttk.Button(row, text="☼  Flash", command=lambda: self.send_control("torch")).pack(fill="x", expand=True, side="left", padx=(7, 0))
+        ttk.Button(row, text="◎  Focus", command=lambda: self.send_control("focus")).pack(fill="x", expand=True, side="left", padx=(7, 0))
 
-        self.make_slider("Zoom", self.zoom_value, 1, 10, lambda v: f"{float(v):.1f}×", self.apply_zoom)
-        self.make_slider("Exposure compensation", self.exposure_value, -3, 3,
-                         lambda v: f"{int(round(float(v))):+d} steps", self.apply_exposure, integer=True)
-        tk.Label(self.sidebar, text="White balance", bg=PANEL, fg=TEXT, font=("Segoe UI", 10)).pack(anchor="w", padx=16, pady=(10, 4))
-        wb_row = tk.Frame(self.sidebar, bg=PANEL)
-        wb_row.pack(fill="x", padx=16, pady=(0, 8))
-        self.white_balance_box = ttk.Combobox(wb_row, textvariable=self.white_balance, state="readonly",
-                                               values=("auto", "daylight", "cloudy", "incandescent", "fluorescent"))
-        self.white_balance_box.pack(side="left", fill="x", expand=True)
-        ttk.Button(wb_row, text="Apply", command=self.apply_white_balance).pack(side="left", padx=(6, 0))
+        self.make_slider("Zoom", self.zoom_value, 1, 4, lambda v: f"{float(v):.1f}×", self.apply_zoom)
         self.section(self.sidebar, "Image quality")
         tk.Label(self.sidebar, text="Capture resolution", bg=PANEL, fg=TEXT, font=("Segoe UI", 10)).pack(anchor="w", padx=16)
         self.resolution_box = ttk.Combobox(self.sidebar, textvariable=self.resolution, state="readonly",
@@ -242,150 +165,54 @@ class CamLinkDesktop:
             self.toggle_button.configure(text="›")
             self.sidebar_visible = False
         else:
-            self.sidebar.pack(side="right", fill="y", before=self.divider)
+            self.sidebar.pack(side="left", fill="y", before=self.divider)
             self.toggle_button.configure(text="‹")
             self.sidebar_visible = True
-        self.save_settings()
 
     def connect(self):
-        try:
-            host = normalize_camera_address(self.ip.get())
-        except ValueError as exc:
-            messagebox.showerror("CamLink", str(exc))
+        host = self.ip.get().strip()
+        if not host or any(c in host for c in "/ :"):
+            messagebox.showerror("CamLink", "Enter the camera phone's IP address, for example 192.168.1.12.")
             return
-
-        # Store the normalized host only; /frame, /control, and /stats all use
-        # the same local HTTP origin on port 8080.
-        self.ip.set(host)
         self.disconnect(clear_status=False)
-        self.connection_generation += 1
-        generation = self.connection_generation
         self.host = host
-        self.save_settings()
         self.running = True
         self.connect_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.status.set(f"Connecting to {host}:8080…")
         self.live_badge.configure(text="●  CONNECTING", fg="#ffd479")
-        self.worker = threading.Thread(target=self.fetch_loop, args=(generation,), daemon=True)
+        self.worker = threading.Thread(target=self.fetch_loop, daemon=True)
         self.worker.start()
 
-    def http_get(self, path, timeout):
-        """Use a plain local HTTP GET, matching CamLink's simple frame-polling protocol."""
-        host = self.host.strip("[]")
-        connection = http.client.HTTPConnection(host, 8080, timeout=timeout)
-        try:
-            connection.request(
-                "GET",
-                path,
-                headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
-            )
-            response = connection.getresponse()
-            body = response.read()
-            return response.status, response.headers.get("Content-Type", "").lower(), body
-        finally:
-            connection.close()
-
-    def fetch_loop(self, generation):
-        # Poll the same /frame endpoint used by CamLink's Android viewer.
-        # Each connection gets a generation token so an older worker cannot resume
-        # polling if the user quickly presses Stop and then Connect again.
-        retry_delay = 0.10
-        while self.running and generation == self.connection_generation:
+    def fetch_loop(self):
+        while self.running:
             try:
-                status, content_type, jpeg = self.http_get(
-                    f"/frame?t={time.time_ns()}", timeout=3
-                )
-                if status != 200:
-                    detail = "Camera is still starting" if b"Camera is starting" in jpeg else f"HTTP {status}"
-                    raise ConnectionError(f"Camera frame unavailable: {detail}")
-                if not self.running or generation != self.connection_generation:
-                    return
-                if not jpeg:
-                    raise ConnectionError("The phone returned an empty frame")
-                if not jpeg.startswith(b"\xff\xd8"):
-                    detail = "Camera is still starting" if b"Camera is starting" in jpeg else f"unexpected response ({content_type or 'unknown content type'})"
-                    raise ConnectionError(f"/frame did not return a JPEG image: {detail}. Check the camera address and sharing status.")
-
-                # Keep only the newest compressed frame, using the existing low-latency
-                # UI consumer so queued frames cannot build up.
-                with self.pending_jpeg_lock:
-                    self.pending_jpeg = jpeg
-                    self.pending_sequence += 1
-                    self.received_frames += 1
-                    self.received_bytes += len(jpeg)
-                retry_delay = 0.10
-            except Exception as exc:
-                if self.running and generation == self.connection_generation:
-                    try:
-                        self.root.after(0, self.set_error, str(exc))
-                    except tk.TclError:
-                        return
-                    time.sleep(retry_delay)
-                    retry_delay = min(0.75, retry_delay * 1.7)
-
-            # Avoid hammering the phone's HTTP server while polling individual frames.
-            if self.running and generation == self.connection_generation:
-                time.sleep(0.01)
-
-    def consume_latest_frame(self):
-        if not self.root.winfo_exists():
-            return
-
-        jpeg = None
-        sequence = 0
-        stats_updated = False
-        with self.pending_jpeg_lock:
-            if self.pending_sequence != self.displayed_sequence and self.pending_jpeg is not None:
-                jpeg = self.pending_jpeg
-                sequence = self.pending_sequence
-            now = time.monotonic()
-            elapsed = now - self.last_stats_time
-            if elapsed >= 1.0:
-                frames = self.received_frames
-                byte_count = self.received_bytes
-                self.received_frames = 0
-                self.received_bytes = 0
-                self.last_stats_time = now
-                self.received_fps = frames / elapsed
-                self.received_mbps = (byte_count * 8 / elapsed) / 1_000_000
-                stats_updated = True
-
-        if jpeg is not None:
-            self.displayed_sequence = sequence
-            started = time.perf_counter()
-            try:
-                with Image.open(io.BytesIO(jpeg)) as source:
+                url = f"http://{self.host}:8080/frame?t={time.time_ns()}"
+                req = Request(url, headers={"Cache-Control": "no-cache"})
+                with urlopen(req, timeout=3) as response:
+                    data = response.read()
+                with Image.open(io.BytesIO(data)) as source:
                     image = source.convert("RGB")
-                self.decode_ms = (time.perf_counter() - started) * 1000.0
-                self.show_frame(image)
+                self.root.after(0, self.show_frame, image)
+                # No intentional frame delay: fetch the next frame as soon as this one finishes.
             except Exception as exc:
-                self.status.set(f"Received an invalid frame: {exc}")
-
-        if self.running:
-            # Update text widgets once per second, not once per preview tick.
-            if stats_updated:
-                self.fps_label.configure(
-                    text=f"{self.received_fps:.0f} RX FPS · {self.decode_ms:.1f} ms decode"
-                )
-                if self.received_fps > 0:
-                    self.status.set(
-                        f"Connected to {self.host}:8080  ·  {self.received_mbps:.1f} Mbps"
-                    )
-
-        # Keep the consumer alive while disconnected; Connect may be pressed long
-        # after startup, and the frame renderer must still be waiting for new frames.
-        try:
-            self.preview_tick_id = self.root.after(16, self.consume_latest_frame)
-        except tk.TclError:
-            self.preview_tick_id = None
-
+                self.root.after(0, self.set_error, str(exc))
+                time.sleep(0.7)
 
     def show_frame(self, image):
         if not self.running:
             return
         self.last_image = image
+        self.frame_count += 1
+        now = time.monotonic()
+        elapsed = now - self.last_fps_time
+        if elapsed >= 1:
+            self.fps = self.frame_count / elapsed
+            self.frame_count = 0
+            self.last_fps_time = now
+            self.fps_label.configure(text=f"{self.fps:.0f} FPS")
         self.redraw_last_image()
+        self.status.set(f"Connected to {self.host}:8080")
         self.live_badge.configure(text="●  LIVE", fg=GREEN)
 
     def redraw_last_image(self, _event=None):
@@ -394,9 +221,7 @@ class CamLinkDesktop:
         width = max(self.preview.winfo_width(), 80)
         height = max(self.preview.winfo_height(), 80)
         image = self.last_image.copy()
-        if self.preview_mode == "fit":
-            # Bilinear resampling is much cheaper than Lanczos for a continuously updating preview.
-            image.thumbnail((width, height), Image.Resampling.BILINEAR)
+        image.thumbnail((width, height), Image.Resampling.LANCZOS)
         self.frame_photo = ImageTk.PhotoImage(image)
         self.preview.configure(image=self.frame_photo, text="")
 
@@ -406,21 +231,19 @@ class CamLinkDesktop:
             self.live_badge.configure(text="●  RETRYING", fg="#ffd479")
 
     def send_control(self, command, value=None):
-        self.save_settings()
         if not self.running:
             self.control_status.set("Connect to the camera phone first.")
             return
         params = {"cmd": command}
         if value is not None:
             params["value"] = str(value)
-        path = f"/control?{urlencode(params)}"
+        url = f"http://{self.host}:8080/control?{urlencode(params)}"
 
         def worker():
             try:
-                status, _content_type, body = self.http_get(path, timeout=4)
-                result = body.decode("utf-8", errors="replace")
-                if status != 200:
-                    result = f"HTTP {status}: {result}"
+                req = Request(url, headers={"Cache-Control": "no-cache"})
+                with urlopen(req, timeout=4) as response:
+                    result = response.read().decode("utf-8", errors="replace")
                 self.root.after(0, self.control_status.set, result)
             except Exception as exc:
                 self.root.after(0, self.control_status.set, f"Control failed: {exc}")
@@ -428,12 +251,6 @@ class CamLinkDesktop:
 
     def apply_zoom(self):
         self.send_control("zoom", round(self.zoom_value.get(), 1))
-
-    def apply_exposure(self):
-        self.send_control("exposure", int(round(self.exposure_value.get())))
-
-    def apply_white_balance(self):
-        self.send_control("whitebalance", self.white_balance.get())
 
     def apply_resolution(self):
         choices = ("480p · Low", "720p · HD", "1080p · Full HD", "1440p · 2K", "2160p · 4K")
@@ -445,46 +262,8 @@ class CamLinkDesktop:
     def apply_jpeg(self):
         self.send_control("jpeg", int(self.jpeg_value.get()))
 
-    def apply_performance_profile(self):
-        # Favor the camera/network/preview pipeline over maximum image detail.
-        self.resolution.set("720p · HD")
-        self.jpeg_value.set(75)
-        self.save_settings()
-        if not self.running:
-            self.control_status.set("Performance preset saved. Connect to the camera to apply 720p / JPEG 75%.")
-            return
-
-        self.control_status.set("Applying performance preset: 720p · JPEG 75%…")
-
-        def worker():
-            results = []
-            try:
-                for command, value in (("quality", "1"), ("jpeg", "75")):
-                    params = urlencode({"cmd": command, "value": value})
-                    status, _content_type, body = self.http_get(
-                        f"/control?{params}", timeout=4
-                    )
-                    result = body.decode("utf-8", errors="replace")
-                    if status != 200:
-                        raise ConnectionError(f"HTTP {status}: {result}")
-                    results.append(result)
-                message = "Performance preset applied · 720p / JPEG 75%"
-            except Exception as exc:
-                message = f"Could not apply full performance preset: {exc}"
-            try:
-                self.root.after(0, self.control_status.set, message)
-            except tk.TclError:
-                pass
-
-        threading.Thread(target=worker, daemon=True).start()
-
     def disconnect(self, clear_status=True):
         self.running = False
-        self.connection_generation += 1
-        with self.pending_jpeg_lock:
-            self.pending_jpeg = None
-            self.pending_sequence += 1
-            self.displayed_sequence = self.pending_sequence
         if hasattr(self, "connect_button"):
             self.connect_button.configure(state="normal")
             self.stop_button.configure(state="disabled")
@@ -497,101 +276,7 @@ class CamLinkDesktop:
             self.live_badge.configure(text="●  DISCONNECTED", fg=MUTED)
             self.fps_label.configure(text="— FPS")
 
-    def safe_number(self, key, default, minimum, maximum):
-        try:
-            value = float(self.settings.get(key, default))
-        except (TypeError, ValueError):
-            value = float(default)
-        return max(minimum, min(maximum, value))
-
-    def load_settings(self):
-        try:
-            with self.settings_path.open("r", encoding="utf-8") as source:
-                data = json.load(source)
-            return data if isinstance(data, dict) else {}
-        except (OSError, json.JSONDecodeError):
-            return {}
-
-    def save_settings(self):
-        if not hasattr(self, "settings_path"):
-            return
-        try:
-            geometry = getattr(self, "windowed_geometry", "1360x860")
-            if hasattr(self, "root") and not getattr(self, "fullscreen", False):
-                geometry = self.root.geometry()
-            settings = {
-                "host": self.ip.get().strip() if hasattr(self, "ip") else self.settings.get("host", ""),
-                "zoom": float(self.zoom_value.get()) if hasattr(self, "zoom_value") else 1.0,
-                "exposure": float(self.exposure_value.get()) if hasattr(self, "exposure_value") else 0.0,
-                "white_balance": self.white_balance.get() if hasattr(self, "white_balance") else "auto",
-                "jpeg_quality": int(self.jpeg_value.get()) if hasattr(self, "jpeg_value") else 85,
-                "resolution": self.resolution.get() if hasattr(self, "resolution") else "720p · HD",
-                "preview_mode": getattr(self, "preview_mode", "fit"),
-                "sidebar_visible": getattr(self, "sidebar_visible", True),
-                "geometry": geometry
-            }
-            self.settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-            self.settings = settings
-        except (OSError, tk.TclError, ValueError):
-            # Settings persistence is best-effort; it must never interrupt the live preview.
-            pass
-
-    def set_preview_mode(self, mode):
-        if mode not in ("fit", "original"):
-            return
-        self.preview_mode = mode
-        self.redraw_last_image()
-        self.save_settings()
-        if mode == "fit":
-            self.status.set("Preview scaled to fit the window")
-        else:
-            self.status.set("Original pixel size · scroll/resize window to inspect")
-
-    def toggle_fullscreen(self, _event=None):
-        if not self.fullscreen:
-            try:
-                self.windowed_geometry = self.root.geometry()
-            except tk.TclError:
-                pass
-            self.fullscreen = True
-            self.root.attributes("-fullscreen", True)
-            self.fullscreen_button.configure(text="Exit fullscreen  (Esc)")
-        else:
-            self.exit_fullscreen()
-
-    def exit_fullscreen(self, _event=None):
-        if self.fullscreen:
-            self.fullscreen = False
-            self.root.attributes("-fullscreen", False)
-            self.root.geometry(self.windowed_geometry)
-            self.fullscreen_button.configure(text="Fullscreen  (F11)")
-            self.save_settings()
-
-    def save_snapshot(self):
-        if self.last_image is None:
-            messagebox.showinfo("CamLink", "Connect to the camera and wait for a frame before saving a snapshot.")
-            return
-        pictures = Path.home() / "Pictures"
-        initial_dir = pictures if pictures.is_dir() else Path.home()
-        filename = f"CamLink_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-        path = filedialog.asksaveasfilename(
-            parent=self.root,
-            title="Save CamLink snapshot",
-            initialdir=str(initial_dir),
-            initialfile=filename,
-            defaultextension=".jpg",
-            filetypes=(("JPEG image", "*.jpg *.jpeg"), ("PNG image", "*.png"), ("All files", "*.*"))
-        )
-        if not path:
-            return
-        try:
-            self.last_image.save(path)
-            self.status.set(f"Snapshot saved: {path}")
-        except (OSError, ValueError) as exc:
-            messagebox.showerror("CamLink", f"Could not save snapshot:\\n{exc}")
-
     def close(self):
-        self.save_settings()
         self.disconnect()
         self.root.destroy()
 
