@@ -101,6 +101,8 @@ class CamLinkDesktop:
         info.pack(fill="x", pady=(12, 0))
         self.status_label = tk.Label(info, textvariable=self.status, bg=BG, fg=MUTED, font=("Segoe UI", 10))
         self.status_label.pack(side="left")
+        self.take_photo_button = ttk.Button(info, text="📷  Capture image", command=self.take_photo)
+        self.take_photo_button.pack(side="right", padx=(8, 0))
         self.fps_label = tk.Label(info, text="— FPS", bg=BG, fg=GREEN, font=("Segoe UI", 10, "bold"))
         self.fps_label.pack(side="right")
 
@@ -133,18 +135,6 @@ class CamLinkDesktop:
         ttk.Button(row, text="↻  Flip camera", command=lambda: self.send_control("switch")).pack(fill="x", expand=True, side="left")
         ttk.Button(row, text="☼  Flash", command=lambda: self.send_control("torch")).pack(fill="x", expand=True, side="left", padx=(7, 0))
         ttk.Button(row, text="◎  Focus", command=lambda: self.send_control("focus")).pack(fill="x", expand=True, side="left", padx=(7, 0))
-
-        self.section(self.sidebar, "Capture")
-        capture_row = tk.Frame(self.sidebar, bg=PANEL)
-        capture_row.pack(fill="x", padx=16)
-        ttk.Button(capture_row, text="📷  Capture image", command=self.take_photo).pack(
-            fill="x", expand=True, side="left")
-        self.record_button = ttk.Button(
-            capture_row, text="●  Record", command=self.toggle_recording)
-        self.record_button.pack(fill="x", expand=True, side="left", padx=(7, 0))
-        tk.Label(self.sidebar, text="Photos save as JPG/PNG. Video saves as MP4 on this PC.",
-                 bg=PANEL, fg=MUTED, justify="left", font=("Segoe UI", 9),
-                 wraplength=255).pack(anchor="w", padx=16, pady=(7, 0))
 
         self.make_slider("Zoom", self.zoom_value, 1, 4, lambda v: f"{float(v):.1f}×", self.apply_zoom)
         self.section(self.sidebar, "Image quality")
