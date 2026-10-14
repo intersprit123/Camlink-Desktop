@@ -38,6 +38,7 @@ check("Stop button is wired to disconnect()",
 for label, callback in (
     ("Flip camera", 'self.send_control("switch")'),
     ("Flash", 'self.send_control("torch")'),
+    ("Focus", 'self.send_control("focus")'),
     ("Zoom", "self.apply_zoom"),
     ("Apply resolution", "self.apply_resolution"),
     ("JPEG quality", "self.apply_jpeg"),
@@ -70,6 +71,21 @@ check("JPEG slider maps to the jpeg command",
       'self.send_control("jpeg", int(self.jpeg_value.get()))' in SOURCE)
 check("zoom slider maps to the zoom command",
       'self.send_control("zoom", round(self.zoom_value.get(), 1))' in SOURCE)
+
+# Local capture: files are saved by the Windows app, not by the phone.
+check("Photo button opens a Windows Save As dialog",
+      'text="📷  Take photo"' in SOURCE and
+      "filedialog.asksaveasfilename" in SOURCE and "self.last_image.save(path)" in SOURCE)
+check("Recording button toggles MP4 recording",
+      'text="●  Record"' in SOURCE and "command=self.toggle_recording" in SOURCE and
+      'def toggle_recording(self):' in SOURCE and 'def stop_recording(self, show_message=True):' in SOURCE)
+check("MP4 recording writes received /frame images locally",
+      "cv2.VideoWriter(" in SOURCE and "self.video_writer.write(frame)" in SOURCE and
+      "writer.release()" in SOURCE)
+check("Disconnect stops recording and finalizes the video",
+      "self.stop_recording(show_message=False)" in SOURCE)
+check("OpenCV recording dependency is declared",
+      "opencv-python-headless" in (ROOT / "requirements.txt").read_text(encoding="utf-8"))
 
 check("Stop restores connection controls",
       "self.running = False" in SOURCE and
