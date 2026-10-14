@@ -25,6 +25,8 @@ def check(label: str, condition: bool) -> None:
 # UI button -> callback.
 check("Connect button is wired to connect()", 'text="Connect"' in SOURCE and "command=self.connect" in SOURCE)
 check("Stop button is wired to disconnect()", 'text="Stop"' in SOURCE and "command=self.disconnect" in SOURCE)
+check("Ctrl+S keyboard shortcut saves a snapshot", 'self.root.bind("<Control-s>", self._shortcut_save_snapshot)' in SOURCE and "def _shortcut_save_snapshot(" in SOURCE)
+check("Ctrl+B keyboard shortcut toggles the controls sidebar", 'self.root.bind("<Control-b>", self._shortcut_toggle_sidebar)' in SOURCE and "def _shortcut_toggle_sidebar(" in SOURCE)
 for label, callback in (
     ("Flip", 'self.send_control("switch")'),
     ("Flash", 'self.send_control("torch")'),
