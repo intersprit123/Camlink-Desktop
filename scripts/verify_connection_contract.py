@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Static integration-contract checks for CamLink Desktop Build #10.
 
-The source and expected controls are intentionally pinned to the Build #10
-contract. This is a static source test, not a live phone/PC connection test.
+The source and expected connection controls are intentionally pinned to the
+Build #10 contract. This is a static source test, not a live phone/PC test.
 """
 from pathlib import Path
 import ast
@@ -22,15 +22,14 @@ def check(label: str, condition: bool) -> None:
     checks.append(label)
 
 
-# Build #10 source identity: verify the original feature set and architecture,
-# rather than silently validating a different/remade desktop application.
+# Preserve the original Build #10 connection architecture.
 check("Build #10 uses urllib Request/urlopen",
       "from urllib.request import urlopen, Request" in SOURCE and "urlopen(req, timeout=3)" in SOURCE)
 check("Build #10 preserves /frame polling",
       'f"http://{self.host}:8080/frame?t={time.time_ns()}"' in SOURCE)
 check("Build #10 does not use /stream", '"/stream' not in SOURCE and "'/stream" not in SOURCE)
 
-# UI button -> callback. Do not assert controls that Build #10 does not have.
+# UI button -> callback.
 check("Connect button is wired to connect()",
       'text="Connect"' in SOURCE and "command=self.connect" in SOURCE)
 check("Stop button is wired to disconnect()",
@@ -62,8 +61,8 @@ check("control URL carries cmd/value to port 8080 /control",
       'params["value"] = str(value)' in SOURCE and
       'f"http://{self.host}:8080/control?{urlencode(params)}"' in SOURCE and
       "urlopen(req, timeout=4)" in SOURCE)
-for command in ("switch", "torch", "zoom", "quality", "jpeg"):
-    check(f"Build #10 emits {command} control command", f'"{command}"' in SOURCE)
+for command in ("switch", "torch", "focus", "zoom", "quality", "jpeg"):
+    check(f"desktop emits {command} control command", f'"{command}"' in SOURCE)
 
 check("resolution maps to the quality command",
       'self.send_control("quality", choices.index(self.resolution.get()))' in SOURCE)
@@ -72,26 +71,28 @@ check("JPEG slider maps to the jpeg command",
 check("zoom slider maps to the zoom command",
       'self.send_control("zoom", round(self.zoom_value.get(), 1))' in SOURCE)
 
-# Local capture: files are saved by the Windows app, not by the phone.
-check("Photo button opens a Windows Save As dialog",
-      'text="📷  Take photo"' in SOURCE and
-      "filedialog.asksaveasfilename" in SOURCE and "self.last_image.save(path)" in SOURCE)
-check("Recording button toggles MP4 recording",
-      'text="●  Record"' in SOURCE and "command=self.toggle_recording" in SOURCE and
-      'def toggle_recording(self):' in SOURCE and 'def stop_recording(self, show_message=True):' in SOURCE)
-check("MP4 recording writes received /frame images locally",
-      "cv2.VideoWriter(" in SOURCE and "self.video_writer.write(frame)" in SOURCE and
-      "writer.release()" in SOURCE)
-check("Disconnect stops recording and finalizes the video",
-      "self.stop_recording(show_message=False)" in SOURCE)
-check("OpenCV recording dependency is declared",
-      "opencv-python-headless" in (ROOT / "requirements.txt").read_text(encoding="utf-8"))
+# Photo capture is saved locally by the Windows app.
+check("Photo button is wired to take_photo()",
+      'text="📷  Capture image"' in SOURCE and "command=self.take_photo" in SOURCE)
+check("Photo action opens a Windows Save As dialog",
+      "filedialog.asksaveasfilename(" in SOURCE and
+      'title="Save CamLink photo"' in SOURCE)
+check("Photo action saves the last received frame",
+      "self.last_image.save(path)" in SOURCE and "self.last_image is None" in SOURCE)
+check("Photo supports JPEG and PNG",
+      '("JPEG image", "*.jpg *.jpeg")' in SOURCE and
+      '("PNG image", "*.png")' in SOURCE)
+
+# Keep the broken/unfinished recording UI out of this stable build.
+check("No dangling recording callback remains",
+      "command=self.toggle_recording" not in SOURCE and
+      "def toggle_recording(self):" not in SOURCE)
 
 check("Stop restores connection controls",
       "self.running = False" in SOURCE and
       'self.connect_button.configure(state="normal")' in SOURCE and
       'self.stop_button.configure(state="disabled")' in SOURCE)
-check("close stops the worker and closes the window",
+check("close disconnects and closes the window",
       "self.disconnect()" in SOURCE and "self.root.destroy()" in SOURCE)
 
 print(f"Windows Build #10 connection contract: PASS ({len(checks)} checks)")
