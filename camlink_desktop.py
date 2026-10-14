@@ -288,7 +288,7 @@ class CamLinkDesktop:
                     return
                 if not jpeg:
                     raise ConnectionError("The phone returned an empty frame")
-                if not jpeg.startswith(b"\\xff\\xd8"):
+                if not jpeg.startswith(b"\xff\xd8"):
                     detail = "Camera is still starting" if b"Camera is starting" in jpeg else f"unexpected response ({content_type or 'unknown content type'})"
                     raise ConnectionError(f"/frame did not return a JPEG image: {detail}. Check the camera address and sharing status.")
 
