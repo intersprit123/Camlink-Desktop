@@ -48,17 +48,18 @@ check("worker invalidates stale Stop/Connect pollers",
       "while self.running and generation == self.connection_generation" in SOURCE and
       "self.connection_generation += 1" in SOURCE)
 check("desktop requests Android /frame with cache-busting and no-cache headers",
-      'f"http://{self.host}:8080/frame?t={time.time_ns()}"' in SOURCE and
-      '"Cache-Control": "no-cache"' in SOURCE and '"Pragma": "no-cache"' in SOURCE)
+      'f"/frame?t={time.time_ns()}"' in SOURCE and
+      '"Cache-Control": "no-cache"' in SOURCE and '"Pragma": "no-cache"' in SOURCE and
+      "connection.request(" in SOURCE and "connection.getresponse()" in SOURCE)
 
 check("camera address accepts a bare host or copied HTTP URL on port 8080",
       "def normalize_camera_address(value):" in SOURCE and
       "parsed = urlsplit(candidate)" in SOURCE and
       "port not in (None, 8080)" in SOURCE)
-check("local LAN requests bypass system proxies",
-      "build_opener(ProxyHandler({}))" in SOURCE and
-      "self.http_opener.open(req, timeout=3)" in SOURCE and
-      "self.http_opener.open(req, timeout=4)" in SOURCE)
+check("local LAN requests use direct HTTP without urllib or system proxies",
+      "http.client.HTTPConnection(host, 8080, timeout=timeout)" in SOURCE and
+      "self.http_opener" not in SOURCE and "urlopen(" not in SOURCE and
+      "urllib.request" not in SOURCE)
 check("frame poller rejects non-JPEG responses with a useful diagnostic",
       'if not jpeg.startswith(b"\\xff\\xd8"):' in SOURCE and
       "/frame did not return a JPEG image" in SOURCE)
@@ -68,7 +69,8 @@ check("UI consumer decodes JPEG then draws it in the preview",
       "Image.open(io.BytesIO(jpeg))" in SOURCE and "self.show_frame(image)" in SOURCE and
       "ImageTk.PhotoImage(image)" in SOURCE and "self.preview.configure(image=self.frame_photo" in SOURCE)
 check("poller backs off on request errors and has a finite request timeout",
-      "self.http_opener.open(req, timeout=3)" in SOURCE and "retry_delay = min(0.75, retry_delay * 1.7)" in SOURCE)
+      'self.http_get(\n                    f"/frame?t={time.time_ns()}", timeout=3' in SOURCE and
+      "retry_delay = min(0.75, retry_delay * 1.7)" in SOURCE)
 consumer = SOURCE.split("    def consume_latest_frame(self):", 1)[1].split("    def show_frame(self, image):", 1)[0]
 check("preview timer keeps rearming while disconnected, so Connect can display later frames",
       "\n        try:\n            self.preview_tick_id = self.root.after(16, self.consume_latest_frame)" in consumer)
@@ -77,7 +79,8 @@ check("desktop does not call the /stream endpoint", "/stream" not in SOURCE)
 # Desktop control requests must match Android service command names.
 check("control requests encode cmd/value and call port 8080 /control",
       'params = {"cmd": command}' in SOURCE and 'params["value"] = str(value)' in SOURCE and
-      'f"http://{self.host}:8080/control?{urlencode(params)}"' in SOURCE)
+      'path = f"/control?{urlencode(params)}"' in SOURCE and
+      'self.http_get(path, timeout=4)' in SOURCE)
 for command in ("switch", "torch", "focus", "zoom", "exposure", "whitebalance", "quality", "jpeg"):
     check(f"desktop emits Android-supported {command} command", f'"{command}"' in SOURCE)
 check("performance preset sends both resolution and JPEG settings",
