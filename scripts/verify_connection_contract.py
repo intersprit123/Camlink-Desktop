@@ -50,13 +50,25 @@ check("worker invalidates stale Stop/Connect pollers",
 check("desktop requests Android /frame with cache-busting and no-cache headers",
       'f"http://{self.host}:8080/frame?t={time.time_ns()}"' in SOURCE and
       '"Cache-Control": "no-cache"' in SOURCE and '"Pragma": "no-cache"' in SOURCE)
+
+check("camera address accepts a bare host or copied HTTP URL on port 8080",
+      "def normalize_camera_address(value):" in SOURCE and
+      "parsed = urlsplit(candidate)" in SOURCE and
+      "port not in (None, 8080)" in SOURCE)
+check("local LAN requests bypass system proxies",
+      "build_opener(ProxyHandler({}))" in SOURCE and
+      "self.http_opener.open(req, timeout=3)" in SOURCE and
+      "self.http_opener.open(req, timeout=4)" in SOURCE)
+check("frame poller rejects non-JPEG responses with a useful diagnostic",
+      'if not jpeg.startswith(b"\\xff\\xd8"):' in SOURCE and
+      "/frame did not return a JPEG image" in SOURCE)
 check("received JPEG bytes enter the latest-frame buffer",
       "self.pending_jpeg = jpeg" in SOURCE and "self.pending_sequence += 1" in SOURCE)
 check("UI consumer decodes JPEG then draws it in the preview",
       "Image.open(io.BytesIO(jpeg))" in SOURCE and "self.show_frame(image)" in SOURCE and
       "ImageTk.PhotoImage(image)" in SOURCE and "self.preview.configure(image=self.frame_photo" in SOURCE)
 check("poller backs off on request errors and has a finite request timeout",
-      "urlopen(req, timeout=3)" in SOURCE and "retry_delay = min(0.75, retry_delay * 1.7)" in SOURCE)
+      "self.http_opener.open(req, timeout=3)" in SOURCE and "retry_delay = min(0.75, retry_delay * 1.7)" in SOURCE)
 consumer = SOURCE.split("    def consume_latest_frame(self):", 1)[1].split("    def show_frame(self, image):", 1)[0]
 check("preview timer keeps rearming while disconnected, so Connect can display later frames",
       "\n        try:\n            self.preview_tick_id = self.root.after(16, self.consume_latest_frame)" in consumer)
