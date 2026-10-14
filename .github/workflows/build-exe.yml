@@ -3,6 +3,8 @@ name: Build CamLink Desktop EXE
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
 
 permissions:
