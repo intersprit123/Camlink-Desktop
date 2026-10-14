@@ -6,8 +6,8 @@ import tkinter as tk
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
-from urllib.request import urlopen, Request
-from urllib.parse import urlencode
+from urllib.request import build_opener, ProxyHandler, Request
+from urllib.parse import urlencode, urlsplit
 
 try:
     from PIL import Image, ImageTk
@@ -25,6 +25,31 @@ ACCENT = "#4f7cff"
 GREEN = "#42d6ad"
 
 
+def normalize_camera_address(value):
+    """Accept a bare camera IP/host or a copied HTTP URL for the camera server."""
+    raw = value.strip()
+    if not raw:
+        raise ValueError("Enter the camera phone's IP address or HTTP URL.")
+
+    candidate = raw if "://" in raw else f"http://{raw}"
+    try:
+        parsed = urlsplit(candidate)
+        port = parsed.port  # Accessing .port also validates malformed port numbers.
+    except ValueError as exc:
+        raise ValueError("That camera address is not valid.") from exc
+
+    if parsed.scheme.lower() != "http":
+        raise ValueError("CamLink uses HTTP on the local Wi-Fi network, not HTTPS.")
+    if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+        raise ValueError("Enter the camera phone's IP address or HTTP URL.")
+    if port not in (None, 8080):
+        raise ValueError("CamLink's camera server uses port 8080.")
+
+    hostname = parsed.hostname
+    # Keep IPv6 literals valid when rebuilding the request URL.
+    return f"[{hostname}]" if ":" in hostname else hostname
+
+
 class CamLinkDesktop:
     def __init__(self, root):
         self.root = root
@@ -38,7 +63,7 @@ class CamLinkDesktop:
         self.running = False
         self.connection_generation = 0  # Invalidates older pollers after a rapid Stop/Connect.
         self.host = ""
-        self.worker = None
+        # This app talks only to the camera on the local network. Ignore system/\n        # environment proxies so private LAN addresses are never sent to a proxy.\n        self.http_opener = build_opener(ProxyHandler({}))\n        self.worker = None
         self.frame_photo = None
         self.last_image = None
         self.preview_mode = self.settings.get("preview_mode", "fit")
@@ -223,10 +248,15 @@ class CamLinkDesktop:
         self.save_settings()
 
     def connect(self):
-        host = self.ip.get().strip()
-        if not host or any(c in host for c in "/ :"):
-            messagebox.showerror("CamLink", "Enter the camera phone's IP address, for example 192.168.1.12.")
+        try:
+            host = normalize_camera_address(self.ip.get())
+        except ValueError as exc:
+            messagebox.showerror("CamLink", str(exc))
             return
+
+        # Store the normalized host only; /frame, /control, and /stats all use
+        # the same local HTTP origin on port 8080.
+        self.ip.set(host)
         self.disconnect(clear_status=False)
         self.connection_generation += 1
         generation = self.connection_generation
@@ -248,12 +278,16 @@ class CamLinkDesktop:
             try:
                 url = f"http://{self.host}:8080/frame?t={time.time_ns()}"
                 req = Request(url, headers={"Cache-Control": "no-cache", "Pragma": "no-cache"})
-                with urlopen(req, timeout=3) as response:
+                with self.http_opener.open(req, timeout=3) as response:
                     jpeg = response.read()
+                    content_type = response.headers.get("Content-Type", "").lower()
                 if not self.running or generation != self.connection_generation:
                     return
                 if not jpeg:
                     raise ConnectionError("The phone returned an empty frame")
+                if not jpeg.startswith(b"\\xff\\xd8"):
+                    detail = "Camera is still starting" if b"Camera is starting" in jpeg else f"unexpected response ({content_type or 'unknown content type'})"
+                    raise ConnectionError(f"/frame did not return a JPEG image: {detail}. Check the camera address and sharing status.")
 
                 # Keep only the newest compressed frame, using the existing low-latency
                 # UI consumer so queued frames cannot build up.
@@ -366,7 +400,7 @@ class CamLinkDesktop:
         def worker():
             try:
                 req = Request(url, headers={"Cache-Control": "no-cache"})
-                with urlopen(req, timeout=4) as response:
+                with self.http_opener.open(req, timeout=4) as response:
                     result = response.read().decode("utf-8", errors="replace")
                 self.root.after(0, self.control_status.set, result)
             except Exception as exc:
