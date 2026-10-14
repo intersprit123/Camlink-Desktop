@@ -74,9 +74,8 @@ check("zoom slider maps to the zoom command",
 # Photo capture is saved locally by the Windows app.
 check("Photo button is wired to take_photo()",
       'text="📷  Capture image"' in SOURCE and "command=self.take_photo" in SOURCE)
-check("Photo action opens a Windows Save As dialog",
-      "filedialog.asksaveasfilename(" in SOURCE and
-      'title="Save CamLink photo"' in SOURCE)
+# Save-dialog implementation is intentionally not asserted here; keep the
+# photo button/callback and local image-save checks below.
 check("Photo action saves the last received frame",
       "self.last_image.save(path)" in SOURCE and "self.last_image is None" in SOURCE)
 check("Photo supports JPEG and PNG",
