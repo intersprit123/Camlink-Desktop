@@ -122,7 +122,7 @@ class CamLinkDesktop:
         self.preview.pack(fill="both", expand=True)
         studio_tools = tk.Frame(viewer, bg=BG)
         studio_tools.pack(fill="x", pady=(10, 0))
-        ttk.Button(studio_tools, text="Save snapshot", command=self.save_snapshot).pack(side="left")
+        ttk.Button(studio_tools, text="Save snapshot  (Ctrl+S)", command=self.save_snapshot).pack(side="left")
         ttk.Button(studio_tools, text="Fit to window", command=lambda: self.set_preview_mode("fit")).pack(side="left", padx=(7, 0))
         ttk.Button(studio_tools, text="Original size", command=lambda: self.set_preview_mode("original")).pack(side="left", padx=(7, 0))
         ttk.Button(studio_tools, text="⚡ Max FPS preset", command=self.apply_performance_profile).pack(side="left", padx=(7, 0))
@@ -136,18 +136,30 @@ class CamLinkDesktop:
         self.fps_label = tk.Label(info, text="— FPS", bg=BG, fg=GREEN, font=("Segoe UI", 10, "bold"))
         self.fps_label.pack(side="right")
 
-        tk.Label(root, text="CAMLINK  •  PRIVATE LOCAL NETWORK  •  USE ON A TRUSTED WI-FI NETWORK",
+        tk.Label(root, text="CAMLINK  •  Ctrl+S: SNAPSHOT  •  Ctrl+B: TOGGLE CONTROLS  •  F11: FULLSCREEN  •  TRUSTED WI-FI ONLY",
                  bg=BG, fg="#71819b", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=24, pady=(0, 12))
         if not self.sidebar_visible:
             self.sidebar.pack_forget()
             self.toggle_button.configure(text="›")
         self.root.bind("<F11>", self.toggle_fullscreen)
         self.root.bind("<Escape>", self.exit_fullscreen)
+        self.root.bind("<Control-s>", self._shortcut_save_snapshot)
+        self.root.bind("<Control-S>", self._shortcut_save_snapshot)
+        self.root.bind("<Control-b>", self._shortcut_toggle_sidebar)
+        self.root.bind("<Control-B>", self._shortcut_toggle_sidebar)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.preview.bind("<Configure>", self.redraw_last_image)
         self.ip.set(str(self.settings.get("host", "")))
         self.save_settings()
         self.preview_tick_id = self.root.after(16, self.consume_latest_frame)
+
+    def _shortcut_save_snapshot(self, _event=None):
+        self.save_snapshot()
+        return "break"
+
+    def _shortcut_toggle_sidebar(self, _event=None):
+        self.toggle_sidebar()
+        return "break"
 
     def section(self, parent, title):
         tk.Label(parent, text=title.upper(), bg=PANEL, fg=MUTED,
