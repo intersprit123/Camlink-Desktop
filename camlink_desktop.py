@@ -2,9 +2,11 @@ import io
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, filedialog
 from urllib.request import urlopen, Request
 from urllib.parse import urlencode
+from datetime import datetime
+
 
 try:
     from PIL import Image, ImageTk
@@ -132,6 +134,18 @@ class CamLinkDesktop:
         ttk.Button(row, text="☼  Flash", command=lambda: self.send_control("torch")).pack(fill="x", expand=True, side="left", padx=(7, 0))
         ttk.Button(row, text="◎  Focus", command=lambda: self.send_control("focus")).pack(fill="x", expand=True, side="left", padx=(7, 0))
 
+        self.section(self.sidebar, "Capture")
+        capture_row = tk.Frame(self.sidebar, bg=PANEL)
+        capture_row.pack(fill="x", padx=16)
+        ttk.Button(capture_row, text="📷  Capture image", command=self.take_photo).pack(
+            fill="x", expand=True, side="left")
+        self.record_button = ttk.Button(
+            capture_row, text="●  Record", command=self.toggle_recording)
+        self.record_button.pack(fill="x", expand=True, side="left", padx=(7, 0))
+        tk.Label(self.sidebar, text="Photos save as JPG/PNG. Video saves as MP4 on this PC.",
+                 bg=PANEL, fg=MUTED, justify="left", font=("Segoe UI", 9),
+                 wraplength=255).pack(anchor="w", padx=16, pady=(7, 0))
+
         self.make_slider("Zoom", self.zoom_value, 1, 4, lambda v: f"{float(v):.1f}×", self.apply_zoom)
         self.section(self.sidebar, "Image quality")
         tk.Label(self.sidebar, text="Capture resolution", bg=PANEL, fg=TEXT, font=("Segoe UI", 10)).pack(anchor="w", padx=16)
@@ -214,6 +228,26 @@ class CamLinkDesktop:
         self.redraw_last_image()
         self.status.set(f"Connected to {self.host}:8080")
         self.live_badge.configure(text="●  LIVE", fg=GREEN)
+
+    def take_photo(self):
+        if not self.running or self.last_image is None:
+            messagebox.showinfo("CamLink", "Connect to your phone and wait for a live frame first.")
+            return
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        path = filedialog.asksaveasfilename(
+            title="Save CamLink photo",
+            defaultextension=".jpg",
+            initialfile=f"CamLink_Photo_{stamp}.jpg",
+            filetypes=(("JPEG image", "*.jpg *.jpeg"), ("PNG image", "*.png")),
+        )
+        if not path:
+            return
+        try:
+            self.last_image.save(path)
+            self.control_status.set(f"Photo saved: {path}")
+            messagebox.showinfo("CamLink", f"Photo saved successfully to:\n{path}")
+        except Exception as exc:
+            messagebox.showerror("CamLink", f"Could not save photo:\n{exc}")
 
     def redraw_last_image(self, _event=None):
         if self.last_image is None or not self.running:
