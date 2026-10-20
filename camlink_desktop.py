@@ -7,6 +7,8 @@ from urllib.request import urlopen, Request
 from urllib.parse import urlencode
 from datetime import datetime
 
+import cv2
+import numpy as np
 
 try:
     from PIL import Image, ImageTk
@@ -36,6 +38,9 @@ class CamLinkDesktop:
         self.worker = None
         self.frame_photo = None
         self.last_image = None
+        self.recording = False
+        self.video_writer = None
+        self.record_path = None
         self.sidebar_visible = True
         self.frame_count = 0
         self.last_fps_time = time.monotonic()
@@ -101,10 +106,12 @@ class CamLinkDesktop:
         info.pack(fill="x", pady=(12, 0))
         self.status_label = tk.Label(info, textvariable=self.status, bg=BG, fg=MUTED, font=("Segoe UI", 10))
         self.status_label.pack(side="left")
-        self.take_photo_button = ttk.Button(info, text="📷  Capture image", command=self.take_photo)
+        self.record_button = ttk.Button(info, text="●  Record", command=self.toggle_recording)
+        self.record_button.pack(side="right", padx=(8, 0))
+        self.take_photo_button = ttk.Button(info, text="📷  Take photo", command=self.take_photo)
         self.take_photo_button.pack(side="right", padx=(8, 0))
         self.fps_label = tk.Label(info, text="— FPS", bg=BG, fg=GREEN, font=("Segoe UI", 10, "bold"))
-        self.fps_label.pack(side="right")
+        self.fps_label.pack(side="right", padx=(0, 8))
 
         tk.Label(root, text="Private local-network viewer · Use only on a trusted Wi-Fi network",
                  bg=BG, fg="#657493", font=("Segoe UI", 9)).pack(anchor="w", padx=24, pady=(0, 12))
@@ -207,6 +214,19 @@ class CamLinkDesktop:
         if not self.running:
             return
         self.last_image = image
+        if self.recording and self.video_writer is not None:
+            try:
+                frame = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
+                expected = (
+                    int(self.video_writer.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                    int(self.video_writer.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                )
+                if (frame.shape[1], frame.shape[0]) != expected:
+                    frame = cv2.resize(frame, expected)
+                self.video_writer.write(frame)
+            except Exception as exc:
+                self.stop_recording(show_message=False)
+                messagebox.showerror("CamLink recording", f"Recording stopped because a frame could not be written.\n\n{exc}")
         self.frame_count += 1
         now = time.monotonic()
         elapsed = now - self.last_fps_time
@@ -238,6 +258,56 @@ class CamLinkDesktop:
             messagebox.showinfo("CamLink", f"Photo saved successfully to:\n{path}")
         except Exception as exc:
             messagebox.showerror("CamLink", f"Could not save photo:\n{exc}")
+
+    def toggle_recording(self):
+        if self.recording:
+            self.stop_recording()
+            return
+        if not self.running or self.last_image is None:
+            messagebox.showinfo("CamLink", "Connect to your phone and wait for a live frame before recording.")
+            return
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        path = filedialog.asksaveasfilename(
+            title="Save CamLink video",
+            defaultextension=".mp4",
+            initialfile=f"CamLink_Recording_{stamp}.mp4",
+            filetypes=(("MP4 video", "*.mp4"),),
+        )
+        if not path:
+            return
+        width, height = self.last_image.size
+        writer = cv2.VideoWriter(
+            path, cv2.VideoWriter_fourcc(*"mp4v"), 20.0, (width, height)
+        )
+        if not writer.isOpened():
+            writer.release()
+            messagebox.showerror(
+                "CamLink", "Windows could not create the MP4 file. Choose another location or filename."
+            )
+            return
+        self.video_writer = writer
+        self.record_path = path
+        self.recording = True
+        self.record_button.configure(text="■  Stop recording")
+        self.status.set("Recording video…")
+        self.control_status.set(f"Recording to: {path}")
+
+    def stop_recording(self, show_message=True):
+        if not self.recording:
+            return
+        path = self.record_path
+        self.recording = False
+        writer = self.video_writer
+        self.video_writer = None
+        self.record_path = None
+        if writer is not None:
+            writer.release()
+        if hasattr(self, "record_button"):
+            self.record_button.configure(text="●  Record")
+        if path:
+            self.control_status.set(f"Video saved: {path}")
+            if show_message:
+                messagebox.showinfo("CamLink", f"Recording saved to:\n{path}")
 
     def redraw_last_image(self, _event=None):
         if self.last_image is None or not self.running:
@@ -287,6 +357,7 @@ class CamLinkDesktop:
         self.send_control("jpeg", int(self.jpeg_value.get()))
 
     def disconnect(self, clear_status=True):
+        self.stop_recording(show_message=False)
         self.running = False
         if hasattr(self, "connect_button"):
             self.connect_button.configure(state="normal")
