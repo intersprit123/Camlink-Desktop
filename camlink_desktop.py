@@ -41,6 +41,7 @@ class CamLinkDesktop:
         self.recording = False
         self.video_writer = None
         self.record_path = None
+        self.record_size = None
         self.sidebar_visible = True
         self.frame_count = 0
         self.last_fps_time = time.monotonic()
@@ -217,12 +218,15 @@ class CamLinkDesktop:
         if self.recording and self.video_writer is not None:
             try:
                 frame = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
-                expected = (
-                    int(self.video_writer.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                    int(self.video_writer.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                )
+                expected = self.record_size
+                if expected is None or len(expected) != 2 or expected[0] <= 0 or expected[1] <= 0:
+                    raise ValueError("Invalid recording dimensions; refusing to resize a frame.")
+
+                if frame.ndim != 3 or frame.shape[0] <= 0 or frame.shape[1] <= 0:
+                    raise ValueError("Received an empty or invalid camera frame.")
+
                 if (frame.shape[1], frame.shape[0]) != expected:
-                    frame = cv2.resize(frame, expected)
+                    frame = cv2.resize(frame, expected, interpolation=cv2.INTER_AREA)
                 self.video_writer.write(frame)
             except Exception as exc:
                 self.stop_recording(show_message=False)
@@ -276,6 +280,9 @@ class CamLinkDesktop:
         if not path:
             return
         width, height = self.last_image.size
+        if width <= 0 or height <= 0:
+            messagebox.showerror("CamLink", "The current camera frame has invalid dimensions. Wait for a valid frame and try again.")
+            return
         writer = cv2.VideoWriter(
             path, cv2.VideoWriter_fourcc(*"mp4v"), 20.0, (width, height)
         )
@@ -287,6 +294,7 @@ class CamLinkDesktop:
             return
         self.video_writer = writer
         self.record_path = path
+        self.record_size = (width, height)
         self.recording = True
         self.record_button.configure(text="■  Stop recording")
         self.status.set("Recording video…")
@@ -300,6 +308,7 @@ class CamLinkDesktop:
         writer = self.video_writer
         self.video_writer = None
         self.record_path = None
+        self.record_size = None
         if writer is not None:
             writer.release()
         if hasattr(self, "record_button"):
