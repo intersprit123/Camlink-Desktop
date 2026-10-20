@@ -25,6 +25,7 @@ TEXT = "#f3f6ff"
 MUTED = "#98a7c4"
 ACCENT = "#6d8cff"
 GREEN = "#55dfb4"
+ANDROID_RELEASES_URL = "https://github.com/intersprit123/CamLink/releases"
 
 
 class CamLinkDesktop:
@@ -119,13 +120,13 @@ class CamLinkDesktop:
         setup.pack(fill="x", padx=24, pady=(0, 12))
         tk.Label(
             setup,
-            text="Phone setup: Install and open CamLink on Android, start its camera server, "
+            text="Phone setup: Download and install CamLink for Android from GitHub Releases. Open it, start the camera server, "
                  "and connect both devices to the same Wi-Fi. Enter the phone's IP above.",
             bg=BG, fg="#98a7c4", font=("Segoe UI", 9), justify="left", wraplength=850
         ).pack(side="left", anchor="w", fill="x", expand=True)
         ttk.Button(
-            setup, text="Get Android app",
-            command=lambda: webbrowser.open("https://github.com/intersprit123/CamLink")
+            setup, text="Download Android APK",
+            command=lambda: webbrowser.open(ANDROID_RELEASES_URL)
         ).pack(side="right", padx=(12, 0))
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.preview.bind("<Configure>", self.redraw_last_image)
@@ -217,7 +218,6 @@ class CamLinkDesktop:
                 with Image.open(io.BytesIO(data)) as source:
                     image = source.convert("RGB")
                 self.root.after(0, self.show_frame, image)
-                # No intentional frame delay: fetch the next frame as soon as this one finishes.
             except Exception as exc:
                 self.root.after(0, self.set_error, str(exc))
                 time.sleep(0.7)
@@ -294,14 +294,10 @@ class CamLinkDesktop:
         if width <= 0 or height <= 0:
             messagebox.showerror("CamLink", "The current camera frame has invalid dimensions. Wait for a valid frame and try again.")
             return
-        writer = cv2.VideoWriter(
-            path, cv2.VideoWriter_fourcc(*"mp4v"), 20.0, (width, height)
-        )
+        writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), 20.0, (width, height))
         if not writer.isOpened():
             writer.release()
-            messagebox.showerror(
-                "CamLink", "Windows could not create the MP4 file. Choose another location or filename."
-            )
+            messagebox.showerror("CamLink", "Windows could not create the MP4 file. Choose another location or filename.")
             return
         self.video_writer = writer
         self.record_path = path
