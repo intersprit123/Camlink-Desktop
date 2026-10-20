@@ -73,7 +73,7 @@ check("zoom slider maps to the zoom command",
 
 # Photo capture is saved locally by the Windows app.
 check("Photo button is wired to take_photo()",
-      'text="📷  Capture image"' in SOURCE and "command=self.take_photo" in SOURCE)
+      'text="📷  Take photo"' in SOURCE and "command=self.take_photo" in SOURCE)
 # Save-dialog implementation is intentionally not asserted here; keep the
 # photo button/callback and local image-save checks below.
 check("Photo action saves the last received frame",
@@ -83,9 +83,14 @@ check("Photo supports JPEG and PNG",
       '("PNG image", "*.png")' in SOURCE)
 
 # Keep the broken/unfinished recording UI out of this stable build.
-check("No dangling recording callback remains",
-      "command=self.toggle_recording" not in SOURCE and
-      "def toggle_recording(self):" not in SOURCE)
+check("Recording button is wired and recording methods exist",
+      'text="●  Record"' in SOURCE and "command=self.toggle_recording" in SOURCE and
+      "def toggle_recording(self):" in SOURCE and "def stop_recording(self, show_message=True):" in SOURCE)
+check("MP4 recording writes received /frame images locally",
+      "cv2.VideoWriter(" in SOURCE and "self.video_writer.write(frame)" in SOURCE and
+      "writer.release()" in SOURCE)
+check("OpenCV recording dependency is declared",
+      "opencv-python-headless" in (ROOT / "requirements.txt").read_text(encoding="utf-8"))
 
 check("Stop restores connection controls",
       "self.running = False" in SOURCE and
