@@ -1,6 +1,7 @@
 import io
 import threading
 import time
+import webbrowser
 import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 from urllib.request import urlopen, Request
@@ -114,8 +115,18 @@ class CamLinkDesktop:
         self.fps_label = tk.Label(info, text="— FPS", bg=BG, fg=GREEN, font=("Segoe UI", 10, "bold"))
         self.fps_label.pack(side="right", padx=(0, 8))
 
-        tk.Label(root, text="Private local-network viewer · Use only on a trusted Wi-Fi network",
-                 bg=BG, fg="#657493", font=("Segoe UI", 9)).pack(anchor="w", padx=24, pady=(0, 12))
+        setup = tk.Frame(root, bg=BG)
+        setup.pack(fill="x", padx=24, pady=(0, 12))
+        tk.Label(
+            setup,
+            text="Phone setup: Install and open CamLink on Android, start its camera server, "
+                 "and connect both devices to the same Wi-Fi. Enter the phone's IP above.",
+            bg=BG, fg="#98a7c4", font=("Segoe UI", 9), justify="left", wraplength=850
+        ).pack(side="left", anchor="w", fill="x", expand=True)
+        ttk.Button(
+            setup, text="Get Android app",
+            command=lambda: webbrowser.open("https://github.com/intersprit123/CamLink")
+        ).pack(side="right", padx=(12, 0))
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.preview.bind("<Configure>", self.redraw_last_image)
 
