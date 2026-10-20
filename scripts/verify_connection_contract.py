@@ -96,6 +96,9 @@ check("Stop restores connection controls",
       "self.running = False" in SOURCE and
       'self.connect_button.configure(state="normal")' in SOURCE and
       'self.stop_button.configure(state="disabled")' in SOURCE)
+check("Android app setup instructions and link are visible",
+      "Phone setup: Install and open CamLink on Android" in SOURCE and
+      "Get Android app" in SOURCE and "https://github.com/intersprit123/CamLink" in SOURCE)
 check("close disconnects and closes the window",
       "self.disconnect()" in SOURCE and "self.root.destroy()" in SOURCE)
 
