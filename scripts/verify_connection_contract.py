@@ -45,12 +45,23 @@ for label, callback in (
     check(f"{label} action is wired", callback in SOURCE)
 
 # Connect -> frame worker -> decode -> preview.
-check("Connect starts the frame worker",
-      "threading.Thread(target=self.fetch_loop" in SOURCE and "self.worker.start()" in SOURCE)
+check("Connect starts a generation-bound frame worker",
+      "target=self.fetch_loop" in SOURCE and "args=(self.connection_generation,)" in SOURCE and
+      "self.worker.start()" in SOURCE)
 check("frame fetch uses a finite timeout", "urlopen(req, timeout=3)" in SOURCE)
 check("frame bytes are decoded as an image", "Image.open(io.BytesIO(data))" in SOURCE)
-check("decoded frame is handed to the Tk UI",
-      "self.root.after(0, self.show_frame, image)" in SOURCE)
+check("decoded frames use a coalescing Tk queue",
+      "self.queue_frame(image, session_id)" in SOURCE and
+      "self.root.after(0, self.drain_pending_frame)" in SOURCE and
+      "self.root.after_idle(self.drain_pending_frame)" in SOURCE)
+check("viewer drops duplicate JPEG payloads", "data != last_frame_bytes" in SOURCE)
+check("viewer is paced to a maximum 60 FPS poll rate", "FRAME_POLL_FPS = 60" in SOURCE and
+      "poll_interval = 1.0 / FRAME_POLL_FPS" in SOURCE)
+check("viewer reads camera-side FPS and JPEG timing metrics",
+      "'/stats?t={time.time_ns()}' in SOURCE and "update_camera_stats" in SOURCE and
+      "CAM {self.camera_fps:.0f} FPS" in SOURCE)
+check("reconnect invalidates earlier workers", "self.connection_generation += 1" in SOURCE and
+      "session_id == self.connection_generation" in SOURCE)
 check("preview renders the decoded image",
       "ImageTk.PhotoImage(image)" in SOURCE and
       'self.preview.configure(image=self.frame_photo, text="")' in SOURCE)
