@@ -95,7 +95,7 @@ def main() -> int:
     p95_request = sorted(request_ms)[min(len(request_ms) - 1, int(len(request_ms) * 0.95))] if request_ms else 0.0
     avg_decode = statistics.fmean(decode_ms) if decode_ms else 0.0
 
-    print("\\nResults")
+    print("\nResults")
     print(f"  Duration:             {elapsed:.1f}s")
     print(f"  HTTP requests:        {requests} ({requests / elapsed:.1f}/s)")
     print(f"  New JPEG frames:      {unique_frames} ({unique_frames / elapsed:.1f}/s)")

@@ -58,7 +58,7 @@ check("viewer drops duplicate JPEG payloads", "data != last_frame_bytes" in SOUR
 check("viewer is paced to a maximum 60 FPS poll rate", "FRAME_POLL_FPS = 60" in SOURCE and
       "poll_interval = 1.0 / FRAME_POLL_FPS" in SOURCE)
 check("viewer reads camera-side FPS and JPEG timing metrics",
-      "'/stats?t={time.time_ns()}' in SOURCE and "update_camera_stats" in SOURCE and
+      "/stats?t={time.time_ns()}" in SOURCE and 'update_camera_stats' in SOURCE and
       "CAM {self.camera_fps:.0f} FPS" in SOURCE)
 check("reconnect invalidates earlier workers", "self.connection_generation += 1" in SOURCE and
       "session_id == self.connection_generation" in SOURCE)
