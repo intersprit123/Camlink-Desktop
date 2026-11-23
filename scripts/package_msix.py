@@ -93,7 +93,7 @@ def make_manifest(stage: Path, identity_name: str, publisher: str,
         },
     )
     properties = ET.SubElement(package, f"{{{FOUNDATION}}}Properties")
-    ET.SubElement(properties, f"{{{FOUNDATION}}}DisplayName").text = "Camlink-Desktop"
+    ET.SubElement(properties, f"{{{FOUNDATION}}}DisplayName").text = "CamLink Desktop"
     ET.SubElement(properties, f"{{{FOUNDATION}}}PublisherDisplayName").text = publisher_display_name
     ET.SubElement(properties, f"{{{FOUNDATION}}}Logo").text = "Assets\\StoreLogo.png"
 
@@ -124,8 +124,8 @@ def make_manifest(stage: Path, identity_name: str, publisher: str,
     ET.SubElement(
         application, f"{{{UAP}}}VisualElements",
         {
-            "DisplayName": "Camlink-Desktop",
-            "Description": "View and control the CamLink Android camera stream over Wi-Fi.",
+            "DisplayName": "CamLink Desktop",
+            "Description": "Connect to your CamLink Android phone camera over Wi-Fi. Download the Android app from https://github.com/intersprit123/CamLink/releases.",
             "BackgroundColor": "#0a0f1a",
             "Square150x150Logo": "Assets\\Square150x150Logo.png",
             "Square44x44Logo": "Assets\\Square44x44Logo.png",
