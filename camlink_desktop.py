@@ -1,4 +1,5 @@
 import io
+import json
 import threading
 import time
 import webbrowser
@@ -26,6 +27,7 @@ MUTED = "#98a7c4"
 ACCENT = "#6d8cff"
 GREEN = "#55dfb4"
 ANDROID_RELEASES_URL = "https://github.com/intersprit123/CamLink/releases"
+FRAME_POLL_FPS = 60
 
 
 class CamLinkDesktop:
@@ -38,6 +40,14 @@ class CamLinkDesktop:
         self.running = False
         self.host = ""
         self.worker = None
+        self.connection_generation = 0
+        self.frame_lock = threading.Lock()
+        self.pending_frame = None
+        self.frame_callback_pending = False
+        self.camera_fps = 0.0
+        self.camera_encode_ms = 0.0
+        self.camera_width = 0
+        self.camera_height = 0
         self.frame_photo = None
         self.last_image = None
         self.recording = False
@@ -115,6 +125,9 @@ class CamLinkDesktop:
         self.take_photo_button.pack(side="right", padx=(8, 0))
         self.fps_label = tk.Label(info, text="— FPS", bg=BG, fg=GREEN, font=("Segoe UI", 10, "bold"))
         self.fps_label.pack(side="right", padx=(0, 8))
+        self.camera_stats_label = tk.Label(info, text="CAM — FPS · — ms", bg=BG, fg=MUTED,
+                                           font=("Segoe UI", 9, "bold"))
+        self.camera_stats_label.pack(side="right", padx=(0, 8))
 
         setup = tk.Frame(root, bg=BG)
         setup.pack(fill="x", padx=24, pady=(0, 12))
@@ -205,22 +218,112 @@ class CamLinkDesktop:
         self.stop_button.configure(state="normal")
         self.status.set(f"Connecting to {host}:8080…")
         self.live_badge.configure(text="●  CONNECTING", fg="#ffd479")
-        self.worker = threading.Thread(target=self.fetch_loop, daemon=True)
+        self.worker = threading.Thread(
+            target=self.fetch_loop,
+            args=(self.connection_generation,),
+            daemon=True,
+        )
         self.worker.start()
 
-    def fetch_loop(self):
-        while self.running:
+    def fetch_loop(self, session_id):
+        """Poll /frame at up to 60 Hz without queueing stale UI work."""
+        last_frame_bytes = None
+        next_stats_at = 0.0
+        poll_interval = 1.0 / FRAME_POLL_FPS
+
+        while self.running and session_id == self.connection_generation:
+            cycle_started = time.monotonic()
             try:
                 url = f"http://{self.host}:8080/frame?t={time.time_ns()}"
                 req = Request(url, headers={"Cache-Control": "no-cache"})
                 with urlopen(req, timeout=3) as response:
                     data = response.read()
-                with Image.open(io.BytesIO(data)) as source:
-                    image = source.convert("RGB")
-                self.root.after(0, self.show_frame, image)
+
+                # Avoid decoding and painting an unchanged JPEG while the camera is slower
+                # than the viewer or is temporarily stalled.
+                if data and data != last_frame_bytes:
+                    with Image.open(io.BytesIO(data)) as source:
+                        image = source.convert("RGB")
+                    last_frame_bytes = data
+                    self.queue_frame(image, session_id)
+
+                now = time.monotonic()
+                if now >= next_stats_at:
+                    try:
+                        stats_url = f"http://{self.host}:8080/stats?t={time.time_ns()}"
+                        stats_req = Request(stats_url, headers={"Cache-Control": "no-cache"})
+                        with urlopen(stats_req, timeout=1.5) as response:
+                            stats = json.loads(response.read().decode("utf-8"))
+                        self.root.after(0, self.update_camera_stats, stats, session_id)
+                    except Exception:
+                        # Older camera builds may not expose /stats. Video remains usable.
+                        pass
+                    next_stats_at = now + 1.0
             except Exception as exc:
-                self.root.after(0, self.set_error, str(exc))
+                if self.running and session_id == self.connection_generation:
+                    try:
+                        self.root.after(0, self.set_error, str(exc), session_id)
+                    except tk.TclError:
+                        pass
                 time.sleep(0.7)
+                continue
+
+            remaining = poll_interval - (time.monotonic() - cycle_started)
+            if remaining > 0:
+                time.sleep(remaining)
+
+    def queue_frame(self, image, session_id):
+        """Keep only the newest decoded frame while the Tk UI is busy."""
+        with self.frame_lock:
+            if session_id != self.connection_generation or not self.running:
+                return
+            self.pending_frame = (session_id, image)
+            if self.frame_callback_pending:
+                return
+            self.frame_callback_pending = True
+
+        try:
+            self.root.after(0, self.drain_pending_frame)
+        except tk.TclError:
+            with self.frame_lock:
+                self.pending_frame = None
+                self.frame_callback_pending = False
+
+    def drain_pending_frame(self):
+        with self.frame_lock:
+            pending = self.pending_frame
+            self.pending_frame = None
+            self.frame_callback_pending = False
+
+        if pending is not None:
+            session_id, image = pending
+            if self.running and session_id == self.connection_generation:
+                self.show_frame(image)
+
+        # A newer frame may have arrived while the UI was rendering the previous one.
+        with self.frame_lock:
+            schedule = self.pending_frame is not None and not self.frame_callback_pending
+            if schedule:
+                self.frame_callback_pending = True
+        if schedule:
+            try:
+                self.root.after_idle(self.drain_pending_frame)
+            except tk.TclError:
+                with self.frame_lock:
+                    self.pending_frame = None
+                    self.frame_callback_pending = False
+
+    def update_camera_stats(self, stats, session_id):
+        if not self.running or session_id != self.connection_generation:
+            return
+        self.camera_fps = max(0.0, float(stats.get("fps") or 0.0))
+        self.camera_encode_ms = max(0.0, float(stats.get("encodeMs") or 0.0))
+        self.camera_width = max(0, int(stats.get("width") or 0))
+        self.camera_height = max(0, int(stats.get("height") or 0))
+        self.camera_stats_label.configure(
+            text=f"CAM {self.camera_fps:.0f} FPS · {self.camera_encode_ms:.1f} ms · "
+                 f"{self.camera_width}×{self.camera_height}"
+        )
 
     def show_frame(self, image):
         if not self.running:
@@ -249,7 +352,7 @@ class CamLinkDesktop:
             self.fps = self.frame_count / elapsed
             self.frame_count = 0
             self.last_fps_time = now
-            self.fps_label.configure(text=f"{self.fps:.0f} FPS")
+            self.fps_label.configure(text=f"VIEW {self.fps:.0f} FPS")
         self.redraw_last_image()
         self.status.set(f"Connected to {self.host}:8080")
         self.live_badge.configure(text="●  LIVE", fg=GREEN)
@@ -335,8 +438,8 @@ class CamLinkDesktop:
         self.frame_photo = ImageTk.PhotoImage(image)
         self.preview.configure(image=self.frame_photo, text="")
 
-    def set_error(self, error):
-        if self.running:
+    def set_error(self, error, session_id=None):
+        if self.running and (session_id is None or session_id == self.connection_generation):
             self.status.set(f"Waiting for phone… {error}")
             self.live_badge.configure(text="●  RETRYING", fg="#ffd479")
 
@@ -374,7 +477,19 @@ class CamLinkDesktop:
 
     def disconnect(self, clear_status=True):
         self.stop_recording(show_message=False)
+        self.connection_generation += 1
         self.running = False
+        with self.frame_lock:
+            self.pending_frame = None
+            self.frame_callback_pending = False
+        self.camera_fps = 0.0
+        self.camera_encode_ms = 0.0
+        self.camera_width = 0
+        self.camera_height = 0
+        if hasattr(self, "fps_label"):
+            self.fps_label.configure(text="VIEW — FPS")
+        if hasattr(self, "camera_stats_label"):
+            self.camera_stats_label.configure(text="CAM — FPS · — ms")
         if hasattr(self, "connect_button"):
             self.connect_button.configure(state="normal")
             self.stop_button.configure(state="disabled")
