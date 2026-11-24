@@ -14,6 +14,7 @@ from datetime import datetime
 
 import cv2
 import numpy as np
+import av
 
 try:
     from PIL import Image, ImageTk
@@ -44,6 +45,7 @@ class CamLinkDesktop:
         self.host = ""
         self.adb_path = None
         self.usb_forward_active = False
+        self.decoder_container = None
         self.worker = None
         self.connection_generation = 0
         self.frame_lock = threading.Lock()
@@ -168,6 +170,14 @@ class CamLinkDesktop:
         self.ip_entry = ttk.Entry(self.sidebar, textvariable=self.ip)
         self.ip_entry.pack(fill="x", padx=16, pady=(6, 10))
         self.update_connection_mode()
+        tk.Label(self.sidebar, text="Video transport", bg=PANEL, fg=TEXT,
+                 font=("Segoe UI", 10)).pack(anchor="w", padx=16, pady=(2, 4))
+        self.stream_mode = tk.StringVar(value="H.264 · MediaCodec")
+        self.stream_box = ttk.Combobox(
+            self.sidebar, textvariable=self.stream_mode, state="readonly",
+            values=("H.264 · MediaCodec", "JPEG · Compatibility")
+        )
+        self.stream_box.pack(fill="x", padx=16, pady=(0, 10))
         buttons = tk.Frame(self.sidebar, bg=PANEL)
         buttons.pack(fill="x", padx=16)
         self.connect_button = ttk.Button(buttons, text="Connect", style="Accent.TButton", command=self.connect)
@@ -287,7 +297,11 @@ class CamLinkDesktop:
         self.worker.start()
 
     def fetch_loop(self, session_id):
-        """Poll /frame at up to 60 Hz without queueing stale UI work."""
+        """Receive either the continuous MediaCodec H.264 stream or JPEG fallback."""
+        if self.stream_mode.get().startswith("H.264"):
+            self.fetch_h264_loop(session_id)
+            return
+
         last_frame_bytes = None
         next_stats_at = 0.0
         poll_interval = 1.0 / FRAME_POLL_FPS
@@ -332,6 +346,58 @@ class CamLinkDesktop:
             remaining = poll_interval - (time.monotonic() - cycle_started)
             if remaining > 0:
                 time.sleep(remaining)
+
+    def fetch_h264_loop(self, session_id):
+        """Enable the phone's hardware encoder and decode its Annex-B stream with FFmpeg/PyAV."""
+        while self.running and session_id == self.connection_generation:
+            container = None
+            try:
+                control_url = f"http://{self.host}:8080/control?cmd=h264test&value=on"
+                with urlopen(Request(control_url, headers={"Cache-Control": "no-cache"}), timeout=5) as response:
+                    response.read()
+
+                stream_url = f"http://{self.host}:8080/h264"
+                container = av.open(
+                    stream_url,
+                    format="h264",
+                    options={
+                        "fflags": "nobuffer",
+                        "flags": "low_delay",
+                        "probesize": "32768",
+                        "analyzeduration": "0",
+                    },
+                    timeout=(8.0, 3.0),
+                )
+                self.decoder_container = container
+                video_stream = next((stream for stream in container.streams if stream.type == "video"), None)
+                if video_stream is None:
+                    raise RuntimeError("The phone did not provide an H.264 video stream.")
+
+                for packet in container.demux(video_stream):
+                    if not self.running or session_id != self.connection_generation:
+                        break
+                    for decoded in packet.decode():
+                        if not self.running or session_id != self.connection_generation:
+                            break
+                        rgb = decoded.to_ndarray(format="rgb24")
+                        self.queue_frame(Image.fromarray(rgb), session_id)
+                if self.running and session_id == self.connection_generation:
+                    raise RuntimeError("The H.264 stream ended. Reconnecting…")
+            except Exception as exc:
+                if self.running and session_id == self.connection_generation:
+                    try:
+                        self.root.after(0, self.set_error, f"H.264: {exc}", session_id)
+                    except tk.TclError:
+                        pass
+                    time.sleep(1.0)
+            finally:
+                if self.decoder_container is container:
+                    self.decoder_container = None
+                if container is not None:
+                    try:
+                        container.close()
+                    except Exception:
+                        pass
 
     def queue_frame(self, image, session_id):
         """Keep only the newest decoded frame while the Tk UI is busy."""
@@ -381,10 +447,19 @@ class CamLinkDesktop:
         self.camera_encode_ms = max(0.0, float(stats.get("encodeMs") or 0.0))
         self.camera_width = max(0, int(stats.get("width") or 0))
         self.camera_height = max(0, int(stats.get("height") or 0))
-        self.camera_stats_label.configure(
-            text=f"CAM {self.camera_fps:.0f} FPS · {self.camera_encode_ms:.1f} ms · "
-                 f"{self.camera_width}×{self.camera_height}"
-        )
+        if self.stream_mode.get().startswith("H.264"):
+            h264_fps = max(0.0, float(stats.get("h264Fps") or 0.0))
+            h264_rate = max(0.0, float(stats.get("h264BitrateMbps") or 0.0))
+            h264_width = max(0, int(stats.get("h264Width") or 0))
+            h264_height = max(0, int(stats.get("h264Height") or 0))
+            self.camera_stats_label.configure(
+                text=f"H.264 {h264_fps:.0f} FPS · {h264_rate:.1f} Mbps · {h264_width}×{h264_height}"
+            )
+        else:
+            self.camera_stats_label.configure(
+                text=f"CAM {self.camera_fps:.0f} FPS · {self.camera_encode_ms:.1f} ms · "
+                     f"{self.camera_width}×{self.camera_height}"
+            )
 
     def show_frame(self, image):
         if not self.running:
@@ -538,6 +613,13 @@ class CamLinkDesktop:
 
     def disconnect(self, clear_status=True):
         self.stop_recording(show_message=False)
+        decoder = self.decoder_container
+        self.decoder_container = None
+        if decoder is not None:
+            try:
+                decoder.close()
+            except Exception:
+                pass
         if self.usb_forward_active and self.adb_path:
             try:
                 subprocess.run([self.adb_path, "forward", "--remove", "tcp:8080"],
