@@ -55,7 +55,7 @@ check("decoded frames use a coalescing Tk queue",
       "self.root.after(0, self.drain_pending_frame)" in SOURCE and
       "self.root.after_idle(self.drain_pending_frame)" in SOURCE)
 check("viewer drops duplicate JPEG payloads", "data != last_frame_bytes" in SOURCE)
-check("viewer is paced to a maximum 60 FPS poll rate", "FRAME_POLL_FPS = 60" in SOURCE and
+check("viewer is paced to a maximum 120 FPS poll rate", "FRAME_POLL_FPS = 120" in SOURCE and
       "poll_interval = 1.0 / FRAME_POLL_FPS" in SOURCE)
 check("viewer reads camera-side FPS and JPEG timing metrics",
       "/stats?t={time.time_ns()}" in SOURCE and 'update_camera_stats' in SOURCE and

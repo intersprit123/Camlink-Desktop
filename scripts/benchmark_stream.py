@@ -33,7 +33,7 @@ def main() -> int:
     parser.add_argument("host", help="Camera phone IP address")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--duration", type=float, default=20.0, help="Measurement duration in seconds")
-    parser.add_argument("--poll-fps", type=float, default=60.0, help="Maximum frame poll rate")
+    parser.add_argument("--poll-fps", type=float, default=120.0, help="Maximum frame poll rate")
     parser.add_argument("--timeout", type=float, default=3.0)
     args = parser.parse_args()
 

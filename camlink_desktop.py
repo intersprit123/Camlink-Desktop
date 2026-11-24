@@ -27,7 +27,7 @@ MUTED = "#98a7c4"
 ACCENT = "#6d8cff"
 GREEN = "#55dfb4"
 ANDROID_RELEASES_URL = "https://github.com/intersprit123/CamLink/releases"
-FRAME_POLL_FPS = 60
+FRAME_POLL_FPS = 120
 
 
 class CamLinkDesktop:
