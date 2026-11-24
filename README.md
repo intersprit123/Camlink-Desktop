@@ -28,12 +28,26 @@ The workflow builds the EXE and packages it as an unsigned MSIX. For Microsoft S
 4. Open CamLink Desktop, enter that IP address, and click **Connect**.
 5. Use **Flip**, **Flash**, **Focus**, the zoom and exposure sliders, the white-balance picker, and image-quality controls where the camera supports them.
 
+### USB connection (ADB)
+
+1. Install Android SDK Platform-Tools on Windows and make sure `adb.exe` is on `PATH` (or install the Android SDK in its standard location).
+2. On the phone, enable **Developer options → USB debugging**, connect it to the PC with a data-capable USB cable, and accept the RSA authorization prompt.
+3. Start camera sharing in CamLink on Android.
+4. In CamLink Desktop, choose **USB · ADB** under Connection type and click **Connect**. The desktop app checks for exactly one authorized device and creates an ADB forward tunnel from PC `127.0.0.1:8080` to the phone's port `8080`.
+5. Click **Stop** or close CamLink Desktop to remove the tunnel. Wi-Fi mode remains available and unchanged.
+
+USB mode uses ADB port forwarding over the USB data connection; it does not require the phone and PC to share Wi-Fi. USB debugging must remain enabled while connected.
+
 ## Desktop studio shortcuts and tools
 
 - **Save snapshot** saves the latest received full-resolution frame as JPEG or PNG to a location you choose.
 - **Fit to window** scales the preview to the available panel; **Original size** displays the received pixels without resizing.
 - **Fullscreen** or **F11** toggles fullscreen; **Esc** exits fullscreen.
 - The last camera IP, zoom, exposure, white balance, JPEG quality, resolution selection, preview mode, sidebar visibility, and window size are saved to `~/.camlink_desktop.json` (your Windows home folder). Settings are restored on the next launch.
+
+## Hardware H.264 streaming
+
+Choose **H.264 · MediaCodec** in the desktop **Video transport** selector. CamLink asks the Android service to start its hardware AVC encoder, then reads the phone's continuous Annex-B H.264 stream from `/h264`. The desktop uses PyAV/FFmpeg to decode frames. Choose **JPEG · Compatibility** to use the existing `/frame` polling path instead. H.264 is the preferred high-resolution path; the actual resolution and frame rate depend on the phone's camera and hardware encoder. The H.264 endpoint is a single-viewer, low-latency prototype and is not authenticated or encrypted; use it only on a trusted local network.
 
 ## Performance-first streaming
 

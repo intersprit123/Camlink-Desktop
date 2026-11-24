@@ -1,5 +1,8 @@
 import io
 import json
+import os
+import shutil
+import subprocess
 import threading
 import time
 import webbrowser
@@ -11,6 +14,7 @@ from datetime import datetime
 
 import cv2
 import numpy as np
+import av
 
 try:
     from PIL import Image, ImageTk
@@ -39,6 +43,9 @@ class CamLinkDesktop:
         self.root.configure(bg=BG)
         self.running = False
         self.host = ""
+        self.adb_path = None
+        self.usb_forward_active = False
+        self.decoder_container = None
         self.worker = None
         self.connection_generation = 0
         self.frame_lock = threading.Lock()
@@ -94,9 +101,27 @@ class CamLinkDesktop:
         body = tk.Frame(root, bg=BG)
         body.pack(fill="both", expand=True, padx=22, pady=(0, 12))
         self.body = body
-        self.sidebar = tk.Frame(body, bg=PANEL, width=300, highlightbackground=BORDER, highlightthickness=1)
-        self.sidebar.pack(side="left", fill="y")
-        self.sidebar.pack_propagate(False)
+        # Keep the sidebar shell fixed while its contents scroll independently.
+        self.sidebar_shell = tk.Frame(body, bg=PANEL, width=300,
+                                      highlightbackground=BORDER, highlightthickness=1)
+        self.sidebar_shell.pack(side="left", fill="y")
+        self.sidebar_shell.pack_propagate(False)
+        self.sidebar_canvas = tk.Canvas(self.sidebar_shell, bg=PANEL, highlightthickness=0,
+                                        borderwidth=0, yscrollincrement=24)
+        self.sidebar_scrollbar = ttk.Scrollbar(self.sidebar_shell, orient="vertical",
+                                                command=self.sidebar_canvas.yview)
+        self.sidebar_canvas.configure(yscrollcommand=self.sidebar_scrollbar.set)
+        self.sidebar_scrollbar.pack(side="right", fill="y")
+        self.sidebar_canvas.pack(side="left", fill="both", expand=True)
+        self.sidebar = tk.Frame(self.sidebar_canvas, bg=PANEL)
+        self.sidebar_window = self.sidebar_canvas.create_window(
+            (0, 0), window=self.sidebar, anchor="nw"
+        )
+        self.sidebar.bind("<Configure>", self.update_sidebar_scrollregion)
+        self.sidebar_canvas.bind("<Configure>", self.resize_sidebar_content)
+        for widget in (self.sidebar_canvas, self.sidebar):
+            widget.bind("<Enter>", self.bind_sidebar_mousewheel)
+            widget.bind("<Leave>", self.unbind_sidebar_mousewheel)
         self.build_sidebar()
 
         self.divider = tk.Frame(body, bg=BG, width=34)
@@ -133,8 +158,9 @@ class CamLinkDesktop:
         setup.pack(fill="x", padx=24, pady=(0, 12))
         tk.Label(
             setup,
-            text="Phone setup: Download and install CamLink for Android from GitHub Releases. Open it, start the camera server, "
-                 "and connect both devices to the same Wi-Fi. Enter the phone's IP above.",
+            text="Phone setup: Install CamLink for Android from GitHub Releases and start the camera server. "
+                 "For Wi-Fi, connect both devices to the same network and enter the phone IP. "
+                 "For USB, enable USB debugging, connect a data cable, accept the authorization prompt, and choose USB · ADB.",
             bg=BG, fg="#98a7c4", font=("Segoe UI", 9), justify="left", wraplength=850
         ).pack(side="left", anchor="w", fill="x", expand=True)
         ttk.Button(
@@ -150,11 +176,26 @@ class CamLinkDesktop:
 
     def build_sidebar(self):
         self.section(self.sidebar, "Connection")
-        tk.Label(self.sidebar, text="Camera phone IP address", bg=PANEL, fg=TEXT,
-                 font=("Segoe UI", 10)).pack(anchor="w", padx=16)
+        self.ip_label = tk.Label(self.sidebar, text="Phone IP address (Wi-Fi)", bg=PANEL, fg=TEXT,
+                                 font=("Segoe UI", 10))
+        self.ip_label.pack(anchor="w", padx=16)
+        self.connection_mode = tk.StringVar(value="Wi-Fi")
+        tk.Label(self.sidebar, text="Connection type", bg=PANEL, fg=TEXT, font=("Segoe UI", 10)).pack(anchor="w", padx=16, pady=(0, 4))
+        self.connection_box = ttk.Combobox(self.sidebar, textvariable=self.connection_mode, state="readonly", values=("Wi-Fi", "USB · ADB"))
+        self.connection_box.pack(fill="x", padx=16, pady=(0, 8))
+        self.connection_box.bind("<<ComboboxSelected>>", self.update_connection_mode)
         self.ip = tk.StringVar(value="")
         self.ip_entry = ttk.Entry(self.sidebar, textvariable=self.ip)
         self.ip_entry.pack(fill="x", padx=16, pady=(6, 10))
+        self.update_connection_mode()
+        tk.Label(self.sidebar, text="Video transport", bg=PANEL, fg=TEXT,
+                 font=("Segoe UI", 10)).pack(anchor="w", padx=16, pady=(2, 4))
+        self.stream_mode = tk.StringVar(value="H.264 · MediaCodec")
+        self.stream_box = ttk.Combobox(
+            self.sidebar, textvariable=self.stream_mode, state="readonly",
+            values=("H.264 · MediaCodec", "JPEG · Compatibility")
+        )
+        self.stream_box.pack(fill="x", padx=16, pady=(0, 10))
         buttons = tk.Frame(self.sidebar, bg=PANEL)
         buttons.pack(fill="x", padx=16)
         self.connect_button = ttk.Button(buttons, text="Connect", style="Accent.TButton", command=self.connect)
@@ -198,20 +239,91 @@ class CamLinkDesktop:
 
     def toggle_sidebar(self):
         if self.sidebar_visible:
-            self.sidebar.pack_forget()
+            self.sidebar_shell.pack_forget()
             self.toggle_button.configure(text="›")
             self.sidebar_visible = False
         else:
-            self.sidebar.pack(side="left", fill="y", before=self.divider)
+            self.sidebar_shell.pack(side="left", fill="y", before=self.divider)
             self.toggle_button.configure(text="‹")
             self.sidebar_visible = True
 
+    def update_sidebar_scrollregion(self, _event=None):
+        self.sidebar_canvas.configure(scrollregion=self.sidebar_canvas.bbox("all"))
+
+    def resize_sidebar_content(self, event):
+        self.sidebar_canvas.itemconfigure(self.sidebar_window, width=event.width)
+
+    def bind_sidebar_mousewheel(self, _event=None):
+        self.sidebar_canvas.bind_all("<MouseWheel>", self.on_sidebar_mousewheel)
+        self.sidebar_canvas.bind_all("<Button-4>", self.on_sidebar_mousewheel_linux)
+        self.sidebar_canvas.bind_all("<Button-5>", self.on_sidebar_mousewheel_linux)
+
+    def unbind_sidebar_mousewheel(self, _event=None):
+        self.sidebar_canvas.unbind_all("<MouseWheel>")
+        self.sidebar_canvas.unbind_all("<Button-4>")
+        self.sidebar_canvas.unbind_all("<Button-5>")
+
+    def on_sidebar_mousewheel(self, event):
+        if event.delta:
+            self.sidebar_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    def on_sidebar_mousewheel_linux(self, event):
+        self.sidebar_canvas.yview_scroll(-1 if event.num == 4 else 1, "units")
+
+    def update_connection_mode(self, _event=None):
+        """Show only the fields required by the selected transport."""
+        if self.connection_mode.get() == "USB · ADB":
+            self.ip_label.pack_forget()
+            self.ip_entry.pack_forget()
+        else:
+            self.ip_label.pack(anchor="w", padx=16)
+            self.ip_entry.pack(fill="x", padx=16, pady=(6, 10))
+
+    @staticmethod
+    def find_adb():
+        candidate = shutil.which("adb")
+        if candidate:
+            return candidate
+        sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+        candidates = []
+        if sdk:
+            candidates.append(os.path.join(sdk, "platform-tools", "adb.exe"))
+        candidates.extend([
+            os.path.expandvars(r"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"),
+            os.path.expandvars(r"%USERPROFILE%\AppData\Local\Android\Sdk\platform-tools\adb.exe"),
+        ])
+        for path in candidates:
+            if path and os.path.isfile(path):
+                return path
+        raise FileNotFoundError("adb.exe was not found. Install Android SDK Platform-Tools or add adb to PATH.")
+
     def connect(self):
-        host = self.ip.get().strip()
-        if not host or any(c in host for c in "/ :"):
-            messagebox.showerror("CamLink", "Enter the camera phone's IP address, for example 192.168.1.12.")
-            return
+        mode = self.connection_mode.get()
         self.disconnect(clear_status=False)
+        if mode == "USB · ADB":
+            try:
+                self.adb_path = self.find_adb()
+                result = subprocess.run([self.adb_path, "devices"], capture_output=True, text=True, timeout=8, check=True)
+                authorized = [line.split()[0] for line in result.stdout.splitlines()[1:]
+                              if len(line.split()) >= 2 and line.split()[1] == "device"]
+                if len(authorized) != 1:
+                    raise RuntimeError("Connect exactly one Android phone with USB debugging enabled and authorize this PC. "
+                                       f"ADB found {len(authorized)} authorized device(s).")
+                subprocess.run([self.adb_path, "forward", "tcp:8080", "tcp:8080"],
+                               capture_output=True, text=True, timeout=8, check=True)
+                self.usb_forward_active = True
+                host = "127.0.0.1"
+            except Exception as exc:
+                messagebox.showerror("CamLink USB", f"Could not establish the USB tunnel.\n\n{exc}\n\n"
+                                     "Install Android Platform-Tools, enable USB debugging, connect the phone, and accept the authorization prompt.")
+                self.adb_path = None
+                self.usb_forward_active = False
+                return
+        else:
+            host = self.ip.get().strip()
+            if not host or any(c in host for c in "/ :"):
+                messagebox.showerror("CamLink", "Enter the camera phone IP address, for example 192.168.1.12.")
+                return
         self.host = host
         self.running = True
         self.connect_button.configure(state="disabled")
@@ -226,7 +338,11 @@ class CamLinkDesktop:
         self.worker.start()
 
     def fetch_loop(self, session_id):
-        """Poll /frame at up to 60 Hz without queueing stale UI work."""
+        """Receive either the continuous MediaCodec H.264 stream or JPEG fallback."""
+        if self.stream_mode.get().startswith("H.264"):
+            self.fetch_h264_loop(session_id)
+            return
+
         last_frame_bytes = None
         next_stats_at = 0.0
         poll_interval = 1.0 / FRAME_POLL_FPS
@@ -271,6 +387,58 @@ class CamLinkDesktop:
             remaining = poll_interval - (time.monotonic() - cycle_started)
             if remaining > 0:
                 time.sleep(remaining)
+
+    def fetch_h264_loop(self, session_id):
+        """Enable the phone's hardware encoder and decode its Annex-B stream with FFmpeg/PyAV."""
+        while self.running and session_id == self.connection_generation:
+            container = None
+            try:
+                control_url = f"http://{self.host}:8080/control?cmd=h264test&value=on"
+                with urlopen(Request(control_url, headers={"Cache-Control": "no-cache"}), timeout=5) as response:
+                    response.read()
+
+                stream_url = f"http://{self.host}:8080/h264"
+                container = av.open(
+                    stream_url,
+                    format="h264",
+                    options={
+                        "fflags": "nobuffer",
+                        "flags": "low_delay",
+                        "probesize": "32768",
+                        "analyzeduration": "0",
+                    },
+                    timeout=(8.0, 3.0),
+                )
+                self.decoder_container = container
+                video_stream = next((stream for stream in container.streams if stream.type == "video"), None)
+                if video_stream is None:
+                    raise RuntimeError("The phone did not provide an H.264 video stream.")
+
+                for packet in container.demux(video_stream):
+                    if not self.running or session_id != self.connection_generation:
+                        break
+                    for decoded in packet.decode():
+                        if not self.running or session_id != self.connection_generation:
+                            break
+                        rgb = decoded.to_ndarray(format="rgb24")
+                        self.queue_frame(Image.fromarray(rgb), session_id)
+                if self.running and session_id == self.connection_generation:
+                    raise RuntimeError("The H.264 stream ended. Reconnecting…")
+            except Exception as exc:
+                if self.running and session_id == self.connection_generation:
+                    try:
+                        self.root.after(0, self.set_error, f"H.264: {exc}", session_id)
+                    except tk.TclError:
+                        pass
+                    time.sleep(1.0)
+            finally:
+                if self.decoder_container is container:
+                    self.decoder_container = None
+                if container is not None:
+                    try:
+                        container.close()
+                    except Exception:
+                        pass
 
     def queue_frame(self, image, session_id):
         """Keep only the newest decoded frame while the Tk UI is busy."""
@@ -320,10 +488,19 @@ class CamLinkDesktop:
         self.camera_encode_ms = max(0.0, float(stats.get("encodeMs") or 0.0))
         self.camera_width = max(0, int(stats.get("width") or 0))
         self.camera_height = max(0, int(stats.get("height") or 0))
-        self.camera_stats_label.configure(
-            text=f"CAM {self.camera_fps:.0f} FPS · {self.camera_encode_ms:.1f} ms · "
-                 f"{self.camera_width}×{self.camera_height}"
-        )
+        if self.stream_mode.get().startswith("H.264"):
+            h264_fps = max(0.0, float(stats.get("h264Fps") or 0.0))
+            h264_rate = max(0.0, float(stats.get("h264BitrateMbps") or 0.0))
+            h264_width = max(0, int(stats.get("h264Width") or 0))
+            h264_height = max(0, int(stats.get("h264Height") or 0))
+            self.camera_stats_label.configure(
+                text=f"H.264 {h264_fps:.0f} FPS · {h264_rate:.1f} Mbps · {h264_width}×{h264_height}"
+            )
+        else:
+            self.camera_stats_label.configure(
+                text=f"CAM {self.camera_fps:.0f} FPS · {self.camera_encode_ms:.1f} ms · "
+                     f"{self.camera_width}×{self.camera_height}"
+            )
 
     def show_frame(self, image):
         if not self.running:
@@ -477,6 +654,21 @@ class CamLinkDesktop:
 
     def disconnect(self, clear_status=True):
         self.stop_recording(show_message=False)
+        decoder = self.decoder_container
+        self.decoder_container = None
+        if decoder is not None:
+            try:
+                decoder.close()
+            except Exception:
+                pass
+        if self.usb_forward_active and self.adb_path:
+            try:
+                subprocess.run([self.adb_path, "forward", "--remove", "tcp:8080"],
+                               capture_output=True, text=True, timeout=5)
+            except Exception:
+                pass
+        self.usb_forward_active = False
+        self.adb_path = None
         self.connection_generation += 1
         self.running = False
         with self.frame_lock:

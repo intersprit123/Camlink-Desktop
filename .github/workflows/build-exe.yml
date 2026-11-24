@@ -2,7 +2,7 @@ name: Build CamLink Desktop EXE
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "feature/h264-mediacodec-viewer" ]
   workflow_dispatch:
 
 permissions:
