@@ -43,7 +43,7 @@ class CamLinkDesktop:
         self.running = False
         self.host = ""
         self.adb_path = None
-        self.usb_reverse_active = False
+        self.usb_forward_active = False
         self.worker = None
         self.connection_generation = 0
         self.frame_lock = threading.Lock()
@@ -155,7 +155,7 @@ class CamLinkDesktop:
 
     def build_sidebar(self):
         self.section(self.sidebar, "Connection")
-        tk.Label(self.sidebar, text="Camera phone IP address", bg=PANEL, fg=TEXT,
+        tk.Label(self.sidebar, text="Phone IP address (Wi-Fi only)", bg=PANEL, fg=TEXT,
                  font=("Segoe UI", 10)).pack(anchor="w", padx=16)
         self.connection_mode = tk.StringVar(value="Wi-Fi")
         tk.Label(self.sidebar, text="Connection type", bg=PANEL, fg=TEXT, font=("Segoe UI", 10)).pack(anchor="w", padx=16, pady=(0, 4))
@@ -247,13 +247,13 @@ class CamLinkDesktop:
                                        f"ADB found {len(authorized)} authorized device(s).")
                 subprocess.run([self.adb_path, "forward", "tcp:8080", "tcp:8080"],
                                capture_output=True, text=True, timeout=8, check=True)
-                self.usb_reverse_active = True
+                self.usb_forward_active = True
                 host = "127.0.0.1"
             except Exception as exc:
                 messagebox.showerror("CamLink USB", f"Could not establish the USB tunnel.\\n\\n{exc}\\n\\n"
                                      "Install Android Platform-Tools, enable USB debugging, connect the phone, and accept the authorization prompt.")
                 self.adb_path = None
-                self.usb_reverse_active = False
+                self.usb_forward_active = False
                 return
         else:
             host = self.ip.get().strip()
@@ -525,13 +525,13 @@ class CamLinkDesktop:
 
     def disconnect(self, clear_status=True):
         self.stop_recording(show_message=False)
-        if self.usb_reverse_active and self.adb_path:
+        if self.usb_forward_active and self.adb_path:
             try:
                 subprocess.run([self.adb_path, "forward", "--remove", "tcp:8080"],
                                capture_output=True, text=True, timeout=5)
             except Exception:
                 pass
-        self.usb_reverse_active = False
+        self.usb_forward_active = False
         self.adb_path = None
         self.connection_generation += 1
         self.running = False
