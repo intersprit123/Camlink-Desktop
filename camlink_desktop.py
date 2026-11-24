@@ -245,7 +245,7 @@ class CamLinkDesktop:
                 if len(authorized) != 1:
                     raise RuntimeError("Connect exactly one Android phone with USB debugging enabled and authorize this PC. "
                                        f"ADB found {len(authorized)} authorized device(s).")
-                subprocess.run([self.adb_path, "reverse", "tcp:8080", "tcp:8080"],
+                subprocess.run([self.adb_path, "forward", "tcp:8080", "tcp:8080"],
                                capture_output=True, text=True, timeout=8, check=True)
                 self.usb_reverse_active = True
                 host = "127.0.0.1"
@@ -527,7 +527,7 @@ class CamLinkDesktop:
         self.stop_recording(show_message=False)
         if self.usb_reverse_active and self.adb_path:
             try:
-                subprocess.run([self.adb_path, "reverse", "--remove", "tcp:8080"],
+                subprocess.run([self.adb_path, "forward", "--remove", "tcp:8080"],
                                capture_output=True, text=True, timeout=5)
             except Exception:
                 pass
