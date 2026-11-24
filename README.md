@@ -45,6 +45,10 @@ USB mode uses ADB port forwarding over the USB data connection; it does not requ
 - **Fullscreen** or **F11** toggles fullscreen; **Esc** exits fullscreen.
 - The last camera IP, zoom, exposure, white balance, JPEG quality, resolution selection, preview mode, sidebar visibility, and window size are saved to `~/.camlink_desktop.json` (your Windows home folder). Settings are restored on the next launch.
 
+## Hardware H.264 streaming
+
+Choose **H.264 · MediaCodec** in the desktop **Video transport** selector. CamLink asks the Android service to start its hardware AVC encoder, then reads the phone's continuous Annex-B H.264 stream from `/h264`. The desktop uses PyAV/FFmpeg to decode frames. Choose **JPEG · Compatibility** to use the existing `/frame` polling path instead. H.264 is the preferred high-resolution path; the actual resolution and frame rate depend on the phone's camera and hardware encoder. The H.264 endpoint is a single-viewer, low-latency prototype and is not authenticated or encrypted; use it only on a trusted local network.
+
 ## Performance-first streaming
 
 The desktop reader keeps a single newest-frame slot instead of decoding every JPEG and queuing one UI callback per frame. It decodes at the preview refresh rate (about 60 Hz), drops stale frames instead of accumulating delay, uses faster bilinear scaling, and updates telemetry once per second. The preview reports received FPS, decode time, and estimated stream payload bitrate. Received FPS is not the same as displayed FPS, and decode time is not end-to-end network latency.
