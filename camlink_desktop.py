@@ -101,9 +101,27 @@ class CamLinkDesktop:
         body = tk.Frame(root, bg=BG)
         body.pack(fill="both", expand=True, padx=22, pady=(0, 12))
         self.body = body
-        self.sidebar = tk.Frame(body, bg=PANEL, width=300, highlightbackground=BORDER, highlightthickness=1)
-        self.sidebar.pack(side="left", fill="y")
-        self.sidebar.pack_propagate(False)
+        # Keep the sidebar shell fixed while its contents scroll independently.
+        self.sidebar_shell = tk.Frame(body, bg=PANEL, width=300,
+                                      highlightbackground=BORDER, highlightthickness=1)
+        self.sidebar_shell.pack(side="left", fill="y")
+        self.sidebar_shell.pack_propagate(False)
+        self.sidebar_canvas = tk.Canvas(self.sidebar_shell, bg=PANEL, highlightthickness=0,
+                                        borderwidth=0, yscrollincrement=24)
+        self.sidebar_scrollbar = ttk.Scrollbar(self.sidebar_shell, orient="vertical",
+                                                command=self.sidebar_canvas.yview)
+        self.sidebar_canvas.configure(yscrollcommand=self.sidebar_scrollbar.set)
+        self.sidebar_scrollbar.pack(side="right", fill="y")
+        self.sidebar_canvas.pack(side="left", fill="both", expand=True)
+        self.sidebar = tk.Frame(self.sidebar_canvas, bg=PANEL)
+        self.sidebar_window = self.sidebar_canvas.create_window(
+            (0, 0), window=self.sidebar, anchor="nw"
+        )
+        self.sidebar.bind("<Configure>", self.update_sidebar_scrollregion)
+        self.sidebar_canvas.bind("<Configure>", self.resize_sidebar_content)
+        for widget in (self.sidebar_canvas, self.sidebar):
+            widget.bind("<Enter>", self.bind_sidebar_mousewheel)
+            widget.bind("<Leave>", self.unbind_sidebar_mousewheel)
         self.build_sidebar()
 
         self.divider = tk.Frame(body, bg=BG, width=34)
@@ -221,13 +239,36 @@ class CamLinkDesktop:
 
     def toggle_sidebar(self):
         if self.sidebar_visible:
-            self.sidebar.pack_forget()
+            self.sidebar_shell.pack_forget()
             self.toggle_button.configure(text="›")
             self.sidebar_visible = False
         else:
-            self.sidebar.pack(side="left", fill="y", before=self.divider)
+            self.sidebar_shell.pack(side="left", fill="y", before=self.divider)
             self.toggle_button.configure(text="‹")
             self.sidebar_visible = True
+
+    def update_sidebar_scrollregion(self, _event=None):
+        self.sidebar_canvas.configure(scrollregion=self.sidebar_canvas.bbox("all"))
+
+    def resize_sidebar_content(self, event):
+        self.sidebar_canvas.itemconfigure(self.sidebar_window, width=event.width)
+
+    def bind_sidebar_mousewheel(self, _event=None):
+        self.sidebar_canvas.bind_all("<MouseWheel>", self.on_sidebar_mousewheel)
+        self.sidebar_canvas.bind_all("<Button-4>", self.on_sidebar_mousewheel_linux)
+        self.sidebar_canvas.bind_all("<Button-5>", self.on_sidebar_mousewheel_linux)
+
+    def unbind_sidebar_mousewheel(self, _event=None):
+        self.sidebar_canvas.unbind_all("<MouseWheel>")
+        self.sidebar_canvas.unbind_all("<Button-4>")
+        self.sidebar_canvas.unbind_all("<Button-5>")
+
+    def on_sidebar_mousewheel(self, event):
+        if event.delta:
+            self.sidebar_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    def on_sidebar_mousewheel_linux(self, event):
+        self.sidebar_canvas.yview_scroll(-1 if event.num == 4 else 1, "units")
 
     def update_connection_mode(self, _event=None):
         """Show only the fields required by the selected transport."""
