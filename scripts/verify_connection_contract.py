@@ -108,10 +108,19 @@ check("Stop restores connection controls",
       'self.connect_button.configure(state="normal")' in SOURCE and
       'self.stop_button.configure(state="disabled")' in SOURCE)
 check("Android app setup instructions and link are visible",
-      "Phone setup: Download and install CamLink for Android from GitHub Releases." in SOURCE and
+      "Install CamLink for Android from GitHub Releases and start the camera server." in SOURCE and
+      "USB, enable USB debugging" in SOURCE and
       "Download Android APK" in SOURCE and
       "https://github.com/intersprit123/CamLink/releases" in SOURCE and
       "webbrowser.open(ANDROID_RELEASES_URL)" in SOURCE)
+check("H.264 viewer uses PyAV to decode the continuous Annex-B stream",
+      "import av" in SOURCE and 'format="h264"' in SOURCE and 'f"http://{self.host}:8080/h264"' in SOURCE)
+check("H.264 decoder dependency is declared",
+      "av>=14.0.0" in (ROOT / "requirements.txt").read_text(encoding="utf-8"))
+check("USB ADB forwarding remains available",
+      'self.adb_path, "forward", "tcp:8080", "tcp:8080"' in SOURCE and
+      'self.adb_path, "forward", "--remove", "tcp:8080"' in SOURCE)
+
 check("close disconnects and closes the window",
       "self.disconnect()" in SOURCE and "self.root.destroy()" in SOURCE)
 
