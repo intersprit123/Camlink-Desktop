@@ -138,8 +138,9 @@ class CamLinkDesktop:
         setup.pack(fill="x", padx=24, pady=(0, 12))
         tk.Label(
             setup,
-            text="Phone setup: Download and install CamLink for Android from GitHub Releases. Open it, start the camera server, "
-                 "and connect both devices to the same Wi-Fi. Enter the phone's IP above.",
+            text="Phone setup: Install CamLink for Android from GitHub Releases and start the camera server. "
+                 "For Wi-Fi, connect both devices to the same network and enter the phone IP. "
+                 "For USB, enable USB debugging, connect a data cable, accept the authorization prompt, and choose USB · ADB.",
             bg=BG, fg="#98a7c4", font=("Segoe UI", 9), justify="left", wraplength=850
         ).pack(side="left", anchor="w", fill="x", expand=True)
         ttk.Button(
@@ -155,15 +156,18 @@ class CamLinkDesktop:
 
     def build_sidebar(self):
         self.section(self.sidebar, "Connection")
-        tk.Label(self.sidebar, text="Phone IP address (Wi-Fi only)", bg=PANEL, fg=TEXT,
-                 font=("Segoe UI", 10)).pack(anchor="w", padx=16)
+        self.ip_label = tk.Label(self.sidebar, text="Phone IP address (Wi-Fi)", bg=PANEL, fg=TEXT,
+                                 font=("Segoe UI", 10))
+        self.ip_label.pack(anchor="w", padx=16)
         self.connection_mode = tk.StringVar(value="Wi-Fi")
         tk.Label(self.sidebar, text="Connection type", bg=PANEL, fg=TEXT, font=("Segoe UI", 10)).pack(anchor="w", padx=16, pady=(0, 4))
         self.connection_box = ttk.Combobox(self.sidebar, textvariable=self.connection_mode, state="readonly", values=("Wi-Fi", "USB · ADB"))
         self.connection_box.pack(fill="x", padx=16, pady=(0, 8))
+        self.connection_box.bind("<<ComboboxSelected>>", self.update_connection_mode)
         self.ip = tk.StringVar(value="")
         self.ip_entry = ttk.Entry(self.sidebar, textvariable=self.ip)
         self.ip_entry.pack(fill="x", padx=16, pady=(6, 10))
+        self.update_connection_mode()
         buttons = tk.Frame(self.sidebar, bg=PANEL)
         buttons.pack(fill="x", padx=16)
         self.connect_button = ttk.Button(buttons, text="Connect", style="Accent.TButton", command=self.connect)
@@ -215,6 +219,15 @@ class CamLinkDesktop:
             self.toggle_button.configure(text="‹")
             self.sidebar_visible = True
 
+    def update_connection_mode(self, _event=None):
+        """Show only the fields required by the selected transport."""
+        if self.connection_mode.get() == "USB · ADB":
+            self.ip_label.pack_forget()
+            self.ip_entry.pack_forget()
+        else:
+            self.ip_label.pack(anchor="w", padx=16)
+            self.ip_entry.pack(fill="x", padx=16, pady=(6, 10))
+
     @staticmethod
     def find_adb():
         candidate = shutil.which("adb")
@@ -250,7 +263,7 @@ class CamLinkDesktop:
                 self.usb_forward_active = True
                 host = "127.0.0.1"
             except Exception as exc:
-                messagebox.showerror("CamLink USB", f"Could not establish the USB tunnel.\\n\\n{exc}\\n\\n"
+                messagebox.showerror("CamLink USB", f"Could not establish the USB tunnel.\n\n{exc}\n\n"
                                      "Install Android Platform-Tools, enable USB debugging, connect the phone, and accept the authorization prompt.")
                 self.adb_path = None
                 self.usb_forward_active = False
