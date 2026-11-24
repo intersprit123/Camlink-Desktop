@@ -1,5 +1,8 @@
 import io
 import json
+import os
+import shutil
+import subprocess
 import threading
 import time
 import webbrowser
@@ -39,6 +42,8 @@ class CamLinkDesktop:
         self.root.configure(bg=BG)
         self.running = False
         self.host = ""
+        self.adb_path = None
+        self.usb_reverse_active = False
         self.worker = None
         self.connection_generation = 0
         self.frame_lock = threading.Lock()
@@ -152,6 +157,10 @@ class CamLinkDesktop:
         self.section(self.sidebar, "Connection")
         tk.Label(self.sidebar, text="Camera phone IP address", bg=PANEL, fg=TEXT,
                  font=("Segoe UI", 10)).pack(anchor="w", padx=16)
+        self.connection_mode = tk.StringVar(value="Wi-Fi")
+        tk.Label(self.sidebar, text="Connection type", bg=PANEL, fg=TEXT, font=("Segoe UI", 10)).pack(anchor="w", padx=16, pady=(0, 4))
+        self.connection_box = ttk.Combobox(self.sidebar, textvariable=self.connection_mode, state="readonly", values=("Wi-Fi", "USB · ADB"))
+        self.connection_box.pack(fill="x", padx=16, pady=(0, 8))
         self.ip = tk.StringVar(value="")
         self.ip_entry = ttk.Entry(self.sidebar, textvariable=self.ip)
         self.ip_entry.pack(fill="x", padx=16, pady=(6, 10))
@@ -206,12 +215,51 @@ class CamLinkDesktop:
             self.toggle_button.configure(text="‹")
             self.sidebar_visible = True
 
+    @staticmethod
+    def find_adb():
+        candidate = shutil.which("adb")
+        if candidate:
+            return candidate
+        sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+        candidates = []
+        if sdk:
+            candidates.append(os.path.join(sdk, "platform-tools", "adb.exe"))
+        candidates.extend([
+            os.path.expandvars(r"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"),
+            os.path.expandvars(r"%USERPROFILE%\AppData\Local\Android\Sdk\platform-tools\adb.exe"),
+        ])
+        for path in candidates:
+            if path and os.path.isfile(path):
+                return path
+        raise FileNotFoundError("adb.exe was not found. Install Android SDK Platform-Tools or add adb to PATH.")
+
     def connect(self):
-        host = self.ip.get().strip()
-        if not host or any(c in host for c in "/ :"):
-            messagebox.showerror("CamLink", "Enter the camera phone's IP address, for example 192.168.1.12.")
-            return
+        mode = self.connection_mode.get()
         self.disconnect(clear_status=False)
+        if mode == "USB · ADB":
+            try:
+                self.adb_path = self.find_adb()
+                result = subprocess.run([self.adb_path, "devices"], capture_output=True, text=True, timeout=8, check=True)
+                authorized = [line.split()[0] for line in result.stdout.splitlines()[1:]
+                              if len(line.split()) >= 2 and line.split()[1] == "device"]
+                if len(authorized) != 1:
+                    raise RuntimeError("Connect exactly one Android phone with USB debugging enabled and authorize this PC. "
+                                       f"ADB found {len(authorized)} authorized device(s).")
+                subprocess.run([self.adb_path, "reverse", "tcp:8080", "tcp:8080"],
+                               capture_output=True, text=True, timeout=8, check=True)
+                self.usb_reverse_active = True
+                host = "127.0.0.1"
+            except Exception as exc:
+                messagebox.showerror("CamLink USB", f"Could not establish the USB tunnel.\\n\\n{exc}\\n\\n"
+                                     "Install Android Platform-Tools, enable USB debugging, connect the phone, and accept the authorization prompt.")
+                self.adb_path = None
+                self.usb_reverse_active = False
+                return
+        else:
+            host = self.ip.get().strip()
+            if not host or any(c in host for c in "/ :"):
+                messagebox.showerror("CamLink", "Enter the camera phone IP address, for example 192.168.1.12.")
+                return
         self.host = host
         self.running = True
         self.connect_button.configure(state="disabled")
@@ -477,6 +525,14 @@ class CamLinkDesktop:
 
     def disconnect(self, clear_status=True):
         self.stop_recording(show_message=False)
+        if self.usb_reverse_active and self.adb_path:
+            try:
+                subprocess.run([self.adb_path, "reverse", "--remove", "tcp:8080"],
+                               capture_output=True, text=True, timeout=5)
+            except Exception:
+                pass
+        self.usb_reverse_active = False
+        self.adb_path = None
         self.connection_generation += 1
         self.running = False
         with self.frame_lock:
